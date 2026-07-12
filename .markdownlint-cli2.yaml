@@ -1,0 +1,4 @@
+# Align with the VS Code markdownlint extension settings
+# https://github.com/DavidAnson/vscode-markdownlint#configure
+config:
+  MD013: false

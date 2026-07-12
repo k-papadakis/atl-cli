@@ -1,0 +1,55 @@
+[project]
+name = "atl"
+version = "0.1.0"
+description = "Fetch, render and search Atlassian (Jira + Confluence) content in the terminal."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Konstantinos Papadakis", email = "k.i.papadakis@gmail.com" },
+]
+requires-python = ">=3.14"
+dependencies = ["httpx", "keyring", "markdownify", "pydantic>=2.13.4", "typer"]
+
+[project.scripts]
+atl = "atl.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = ["basedpyright>=1.39.9", "pytest>=9.1.1", "ruff>=0.15.21"]
+
+[tool.basedpyright]
+
+[tool.pytest]
+minversion = "9.0"
+testpaths = ["tests"]
+
+[tool.ruff]
+
+[tool.ruff.lint]
+# Pinned with `select` (not `extend-select`) so the rule set is explicit and a
+# Ruff upgrade can't silently enable new rules. E/F/W are Ruff's defaults, spelt
+# out here rather than left implicit.
+select = [
+    "E",    # pycodestyle errors: PEP-8 layout, `== None`, bare `except`
+    "W",    # pycodestyle warnings (E501/line-length left to the formatter)
+    "F",    # Pyflakes: undefined names, unused imports/vars, dead f-strings
+    "I",    # isort: import grouping and ordering
+    "UP",   # pyupgrade: modern idioms for our requires-python floor (3.14)
+    "B",    # flake8-bugbear: likely bugs (mutable defaults, closure captures)
+    "SIM",  # flake8-simplify: collapse needless if/else and nesting
+    "RUF",  # Ruff's own lints: unused noqa, mutable dataclass defaults, ...
+    "C4",   # flake8-comprehensions: drop wasteful intermediate list()/dict()
+    "PIE",  # flake8-pie: misc dead weight (needless pass, `return None`, ...)
+    "PGH",  # pygrep-hooks: ban blanket `# type: ignore` / `# noqa` (name the code)
+    "PERF", # Perflint: manual loops that should be extend()/comprehensions
+    "TID",  # flake8-tidy-imports: no relative imports (we use absolute already)
+]
+# Line length belongs to the formatter, which won't split string literals; every
+# major Ruff user (httpx, pydantic, Typer, Ruff itself) ignores E501 for this.
+ignore = ["E501"]
+
+[tool.uv]
