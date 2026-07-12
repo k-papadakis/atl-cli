@@ -2,7 +2,7 @@
 request planner. No I/O -- file/stdin reads and the HTTP call live in `cmd_api`.
 """
 
-from atl.commands import (
+from atl_cli.commands import (
     FromFile,
     Inline,
     coerce_field,

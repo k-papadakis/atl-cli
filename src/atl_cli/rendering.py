@@ -9,9 +9,9 @@ from dataclasses import dataclass
 
 from markdownify import markdownify
 
-from atl.errors import AtlError
-from atl.models import Page
-from atl.schemas import (
+from atl_cli.errors import AtlError
+from atl_cli.models import Page
+from atl_cli.schemas import (
     Changelog,
     Children,
     CommentPage,

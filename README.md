@@ -15,7 +15,14 @@ escape hatch for anything they don't cover (including writes).
 ## Install
 
 ```sh
-uv tool install git+https://github.com/k-papadakis/atl
+uv tool install atl-cli
+```
+
+This installs the `atl` command. To install the latest unreleased version from
+source instead:
+
+```sh
+uv tool install git+https://github.com/k-papadakis/atl-cli
 ```
 
 ## Usage

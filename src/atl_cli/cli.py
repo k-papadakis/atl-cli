@@ -6,10 +6,10 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from atl import __version__
-from atl.account import load_credentials, remove_credentials
-from atl.client import AtlassianClient
-from atl.commands import (
+from atl_cli import __version__
+from atl_cli.account import load_credentials, remove_credentials
+from atl_cli.client import AtlassianClient
+from atl_cli.commands import (
     OutputFormat,
     cmd_api,
     cmd_confluence_attachment,
@@ -21,7 +21,7 @@ from atl.commands import (
     cmd_login,
     cmd_status,
 )
-from atl.errors import AtlError
+from atl_cli.errors import AtlError
 
 # Rich stderr console, as Typer recommends for output/errors; it honors
 # NO_COLOR, FORCE_COLOR and tty detection automatically.

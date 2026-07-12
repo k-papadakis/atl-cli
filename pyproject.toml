@@ -1,5 +1,7 @@
 [project]
-name = "atl"
+# Distributed as "atl-cli" ("atl" is taken on PyPI); the package imports as
+# `atl_cli`, but the installed command stays `atl` via [project.scripts] below.
+name = "atl-cli"
 version = "0.1.0"
 description = "Fetch, render and search Atlassian (Jira + Confluence) content in the terminal."
 readme = "README.md"
@@ -9,10 +11,26 @@ authors = [
   { name = "Konstantinos Papadakis", email = "k.i.papadakis@gmail.com" },
 ]
 requires-python = ">=3.14"
+keywords = ["atlassian", "jira", "confluence", "cli", "markdown", "terminal"]
+# No "License ::" classifier: PyPI rejects it alongside the SPDX `license` above.
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Utilities",
+]
 dependencies = ["httpx", "keyring", "markdownify", "pydantic>=2.13.4", "typer"]
 
+[project.urls]
+Homepage = "https://github.com/k-papadakis/atl-cli"
+Repository = "https://github.com/k-papadakis/atl-cli"
+Issues = "https://github.com/k-papadakis/atl-cli/issues"
+
 [project.scripts]
-atl = "atl.cli:main"
+atl = "atl_cli.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12.0"]

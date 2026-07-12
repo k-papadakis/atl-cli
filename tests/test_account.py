@@ -8,9 +8,9 @@ mocks involved.
 
 import pytest
 
-from atl.account import plan_storage, resolve_token, stored_backend
-from atl.errors import AtlError
-from atl.models import StoredMetadata, TokenBackend
+from atl_cli.account import plan_storage, resolve_token, stored_backend
+from atl_cli.errors import AtlError
+from atl_cli.models import StoredMetadata, TokenBackend
 
 
 def test_plan_storage_keeps_token_out_of_the_file_when_keyring_works() -> None:

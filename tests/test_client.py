@@ -4,7 +4,7 @@ parsing, and web-search URL builders.
 
 import httpx
 
-from atl.client import (
+from atl_cli.client import (
     cursor_from,
     error_message,
     filename_from_disposition,

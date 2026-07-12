@@ -14,29 +14,29 @@ from typing import cast
 import httpx
 from pydantic import JsonValue
 
-from atl.account import (
+from atl_cli.account import (
     load_credentials,
     read_metadata,
     save_credentials,
     stored_backend,
 )
-from atl.client import (
+from atl_cli.client import (
     AtlassianClient,
     Headers,
     Params,
     search_issues_url,
     search_pages_url,
 )
-from atl.config import CRED_FILE
-from atl.errors import AtlError
-from atl.models import Credentials, Page
-from atl.rendering import (
+from atl_cli.config import CRED_FILE
+from atl_cli.errors import AtlError
+from atl_cli.models import Credentials, Page
+from atl_cli.rendering import (
     confluence_search_table,
     jira_search_table,
     render_confluence_page,
     render_jira_issue,
 )
-from atl.schemas import SearchIssue
+from atl_cli.schemas import SearchIssue
 
 
 class OutputFormat(StrEnum):

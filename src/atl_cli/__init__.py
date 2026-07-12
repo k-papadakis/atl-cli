@@ -28,4 +28,5 @@ Design: the package is layered so side effects sit at the edges.
 
 from importlib.metadata import version
 
-__version__ = version("atl")
+# Distribution name ("atl-cli"), not the import name ("atl_cli"); see pyproject.
+__version__ = version("atl-cli")

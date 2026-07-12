@@ -15,10 +15,10 @@ from typing import ClassVar, cast
 import httpx
 from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
-from atl.config import HTTP_TIMEOUT, SEARCH_PAGE_SIZE
-from atl.errors import AtlError
-from atl.models import Credentials, Page
-from atl.schemas import (
+from atl_cli.config import HTTP_TIMEOUT, SEARCH_PAGE_SIZE
+from atl_cli.errors import AtlError
+from atl_cli.models import Credentials, Page
+from atl_cli.schemas import (
     ApiError,
     CommentPage,
     ConfluenceAttachment,

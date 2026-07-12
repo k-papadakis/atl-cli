@@ -2,16 +2,16 @@
 
 import pytest
 
-from atl.errors import AtlError
-from atl.models import Page
-from atl.rendering import (
+from atl_cli.errors import AtlError
+from atl_cli.models import Page
+from atl_cli.rendering import (
     confluence_search_table,
     format_table,
     jira_search_table,
     render_confluence_page,
     render_jira_issue,
 )
-from atl.schemas import (
+from atl_cli.schemas import (
     CommentPage,
     ConfluenceComments,
     ConfluencePage,

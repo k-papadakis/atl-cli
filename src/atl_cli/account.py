@@ -19,9 +19,9 @@ import keyring
 import keyring.errors
 from pydantic import ValidationError
 
-from atl.config import CONFIG_DIR, CRED_FILE, KEYRING_SERVICE, PROG
-from atl.errors import AtlError
-from atl.models import Credentials, StoredMetadata, TokenBackend
+from atl_cli.config import CONFIG_DIR, CRED_FILE, KEYRING_SERVICE, PROG
+from atl_cli.errors import AtlError
+from atl_cli.models import Credentials, StoredMetadata, TokenBackend
 
 
 # --------------------------------------------------------------------------- #
