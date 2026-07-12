@@ -35,6 +35,7 @@ from atl.schemas import (
 )
 
 type Params = dict[str, str | int]
+type Headers = dict[str, str]
 
 
 def _http_status(resp: httpx.Response) -> str:
@@ -92,21 +93,43 @@ def search_pages_url(base_url: str, cql: str) -> str:
     return f"{base_url}/wiki/search?{httpx.QueryParams(cql=cql)}"
 
 
+def resolve_endpoint(base_url: str, endpoint: str) -> str:
+    """Resolve a raw-passthrough endpoint against the site root.
+
+    A full URL is used verbatim; anything else is joined to ``base_url`` (a
+    leading slash is optional), so the caller types the real REST path -- Jira
+    (``/rest/...``) and Confluence (``/wiki/...``) alike -- version included.
+    """
+    if endpoint.startswith(("http://", "https://")):
+        return endpoint
+    return f"{base_url}/{endpoint.removeprefix('/')}"
+
+
 # --------------------------------------------------------------------------- #
 # Transport primitives: fetch JSON and (optionally) validate it into a model.
 # --------------------------------------------------------------------------- #
-def _get_response(
-    creds: Credentials, url: str, params: Params | None = None, *, label: str
+def _request(
+    creds: Credentials,
+    method: str,
+    url: str,
+    *,
+    params: Params | None = None,
+    content: bytes | None = None,
+    headers: Headers | None = None,
+    label: str,
 ) -> httpx.Response:
-    """GET a URL with auth, mapping transport errors to AtlError.
+    """Perform an authenticated request, mapping transport errors to AtlError.
 
     ``follow_redirects`` carries the auth through the signed-media hop that
     attachment endpoints redirect to.
     """
     try:
-        resp = httpx.get(
+        resp = httpx.request(
+            method,
             url,
             params=params,
+            content=content,
+            headers=headers,
             auth=(creds.username, creds.token),
             timeout=HTTP_TIMEOUT,
             follow_redirects=True,
@@ -117,6 +140,13 @@ def _get_response(
     except httpx.HTTPError as exc:
         raise AtlError(f"{label} API request failed: {exc}") from exc
     return resp
+
+
+def _get_response(
+    creds: Credentials, url: str, params: Params | None = None, *, label: str
+) -> httpx.Response:
+    """GET a URL with auth, mapping transport errors to AtlError."""
+    return _request(creds, "GET", url, params=params, label=label)
 
 
 def _fetch_json(
@@ -430,3 +460,27 @@ class AtlassianClient:
     def __post_init__(self) -> None:
         self.jira = JiraApi(self.creds)
         self.confluence = ConfluenceApi(self.creds)
+
+    def api(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        params: Params | None = None,
+        content: bytes | None = None,
+        headers: Headers | None = None,
+    ) -> httpx.Response:
+        """Raw passthrough: an arbitrary authenticated request to the site.
+
+        Backs `atl api`; the endpoint is resolved against the site root so any
+        REST surface (Jira, Confluence, Agile, v2, ...) is reachable.
+        """
+        return _request(
+            self.creds,
+            method,
+            resolve_endpoint(self.creds.base_url, endpoint),
+            params=params,
+            content=content,
+            headers=headers,
+            label="Atlassian",
+        )

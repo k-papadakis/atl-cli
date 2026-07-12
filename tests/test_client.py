@@ -8,6 +8,7 @@ from atl.client import (
     cursor_from,
     error_message,
     filename_from_disposition,
+    resolve_endpoint,
     search_issues_url,
     search_pages_url,
 )
@@ -58,3 +59,20 @@ def test_search_pages_url_encodes_the_cql() -> None:
     assert url.startswith("https://site/wiki/search?cql=")
     assert " " not in url
     assert '"' not in url  # spaces and quotes are encoded, not left to break the URL
+
+
+def test_resolve_endpoint_joins_paths_to_the_site_root() -> None:
+    """A leading slash is optional; both forms hang off the site root."""
+    base = "https://site"
+    assert (
+        resolve_endpoint(base, "/rest/api/3/myself") == "https://site/rest/api/3/myself"
+    )
+    assert (
+        resolve_endpoint(base, "rest/api/3/myself") == "https://site/rest/api/3/myself"
+    )
+
+
+def test_resolve_endpoint_passes_full_urls_through() -> None:
+    """A full URL is used verbatim (e.g. a paginated _links.next or another site)."""
+    url = "https://other.atlassian.net/rest/api/3/field"
+    assert resolve_endpoint("https://site", url) == url

@@ -11,6 +11,7 @@ from atl.account import load_credentials, remove_credentials
 from atl.client import AtlassianClient
 from atl.commands import (
     OutputFormat,
+    cmd_api,
     cmd_confluence_attachment,
     cmd_confluence_search,
     cmd_confluence_view,
@@ -91,6 +92,57 @@ OutputPath = Annotated[
         "-o", "--output", help="path to write to (default: the attachment's filename)"
     ),
 ]
+
+# `atl api` options, named after their `gh api` counterparts.
+Method = Annotated[
+    str | None,
+    typer.Option(
+        "-X", "--method", help="HTTP method (default: GET, or POST with a body)"
+    ),
+]
+RawField = Annotated[
+    list[str] | None,
+    typer.Option("-f", "--raw-field", help="add a string parameter (key=value)"),
+]
+TypedField = Annotated[
+    list[str] | None,
+    typer.Option(
+        "-F",
+        "--field",
+        help="add a typed parameter (key=value; true/false/null/int convert, @file reads a value)",
+    ),
+]
+InputSource = Annotated[
+    str | None,
+    typer.Option("--input", help="raw request body from a file, or '-' for stdin"),
+]
+Header = Annotated[
+    list[str] | None,
+    typer.Option("-H", "--header", help="add a request header (key:value)"),
+]
+
+
+@app.command("api")
+def api(
+    endpoint: Annotated[
+        str, typer.Argument(help="REST path (e.g. /rest/api/3/myself) or full URL")
+    ],
+    method: Method = None,
+    raw_field: RawField = None,
+    field: TypedField = None,
+    input: InputSource = None,
+    header: Header = None,
+) -> None:
+    """Make an authenticated request to the Atlassian REST API (Jira or Confluence)."""
+    cmd_api(
+        _connect(),
+        endpoint,
+        method=method,
+        raw_fields=raw_field or [],
+        typed_fields=field or [],
+        input_source=input,
+        headers=header or [],
+    )
 
 
 @jira_app.command("view")

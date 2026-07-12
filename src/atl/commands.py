@@ -6,9 +6,12 @@ import getpass
 import json
 import sys
 import webbrowser
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import cast
 
+import httpx
 from pydantic import JsonValue
 
 from atl.account import (
@@ -19,6 +22,8 @@ from atl.account import (
 )
 from atl.client import (
     AtlassianClient,
+    Headers,
+    Params,
     search_issues_url,
     search_pages_url,
 )
@@ -54,6 +59,187 @@ def print_json(data: JsonValue) -> None:
 def report_count(count: int, more: bool) -> None:
     suffix = " (more available; raise --limit)" if more else ""
     print(f"{count} result(s){suffix}", file=sys.stderr)
+
+
+# --------------------------------------------------------------------------- #
+# `atl api` raw passthrough: gh-style field parsing and body/query routing.
+#
+# The core is pure: strings are parsed into fields, and `plan_request` turns
+# them into a `Request` by gh's rules. Only `cmd_api` touches the outside world
+# (files, stdin, HTTP, stdout).
+# --------------------------------------------------------------------------- #
+type Fields = dict[str, JsonValue]
+
+JSON_HEADER: Headers = {"Content-Type": "application/json"}
+
+
+# A `-F` value before any I/O: either an inline (coerced) literal, or a file to
+# read. Resolving the file is deferred to the edge so parsing stays pure.
+@dataclass(frozen=True)
+class Inline:
+    value: JsonValue
+
+
+@dataclass(frozen=True)
+class FromFile:
+    path: str
+
+
+type FieldSource = Inline | FromFile
+
+
+def coerce_field(value: str) -> JsonValue:
+    """gh's `-F` type magic: JSON literals and integers convert, else a string."""
+    match value:
+        case "true":
+            return True
+        case "false":
+            return False
+        case "null":
+            return None
+        case _:
+            try:
+                return int(value)
+            except ValueError:
+                return value
+
+
+def typed_source(value: str) -> FieldSource:
+    """Classify a `-F` value: `@path` reads a file (`@-` = stdin), else coerce."""
+    if value.startswith("@"):
+        return FromFile(value.removeprefix("@"))
+    return Inline(coerce_field(value))
+
+
+def parse_pairs(items: list[str], sep: str, kind: str) -> list[tuple[str, str]]:
+    """Split each ``key<sep>value`` item; a missing separator or key is fatal."""
+    pairs: list[tuple[str, str]] = []
+    for item in items:
+        key, found, value = item.partition(sep)
+        if not found or not key:
+            raise AtlError(f"Invalid {kind} {item!r}; expected key{sep}value.")
+        pairs.append((key, value))
+    return pairs
+
+
+def _query_value(value: JsonValue) -> str:
+    """Render a coerced field as a query-string value (bool → true/false)."""
+    match value:
+        case bool():
+            return "true" if value else "false"
+        case None:
+            return "null"
+        case _:
+            return str(value)
+
+
+def _query(fields: Fields) -> Params | None:
+    return {key: _query_value(value) for key, value in fields.items()} or None
+
+
+# What a request actually sends, once routing is decided. Kept as data so the
+# decision is a pure, testable function separate from the HTTP call.
+@dataclass(frozen=True)
+class Request:
+    method: str
+    params: Params | None
+    content: bytes | None
+    headers: Headers
+
+
+def plan_request(
+    method: str | None, fields: Fields, input_body: bytes | None
+) -> Request:
+    """Decide method, query vs body, and headers by gh's rules (pure).
+
+    Default method is GET, or POST once there is anything to send. A raw
+    ``--input`` body wins and pushes fields to the query string; otherwise a
+    GET/HEAD carries fields as query params and any other method serializes
+    them as a JSON body. Atlassian bodies are JSON, so a body defaults the
+    Content-Type (a user ``-H`` still overrides it).
+    """
+    resolved = (
+        method or ("POST" if fields or input_body is not None else "GET")
+    ).upper()
+    match (input_body, resolved):
+        case (bytes() as body, _):
+            return Request(resolved, _query(fields), body, JSON_HEADER)
+        case (None, "GET" | "HEAD"):
+            return Request(resolved, _query(fields), None, {})
+        case (None, _) if fields:
+            return Request(resolved, None, json.dumps(fields).encode(), JSON_HEADER)
+        case _:
+            return Request(resolved, None, None, {})
+
+
+def render_response(resp: httpx.Response) -> str | None:
+    """The text to print for a raw response: JSON pretty-printed, else verbatim.
+
+    ``None`` means an empty body (e.g. 204), so nothing should be printed.
+    """
+    if not resp.content:
+        return None
+    if "json" not in resp.headers.get("content-type", ""):
+        return resp.text
+    try:
+        return json.dumps(cast(JsonValue, resp.json()), indent=2)
+    except json.JSONDecodeError:
+        return resp.text  # mislabeled body: print it verbatim
+
+
+def cmd_api(
+    client: AtlassianClient,
+    endpoint: str,
+    *,
+    method: str | None,
+    raw_fields: list[str],
+    typed_fields: list[str],
+    input_source: str | None,
+    headers: list[str],
+) -> None:
+    # Pure parse first, then the edge: resolve @file/@- sources and --input.
+    fields: Fields = dict(parse_pairs(raw_fields, "=", "field"))
+    fields.update(
+        {
+            key: resolve_field(typed_source(value))
+            for key, value in parse_pairs(typed_fields, "=", "field")
+        }
+    )
+    input_body = None if input_source is None else read_source(input_source).encode()
+    user_headers: Headers = {
+        key.strip(): value.strip() for key, value in parse_pairs(headers, ":", "header")
+    }
+
+    # Later flags win: user headers override the JSON default.
+    req = plan_request(method, fields, input_body)
+    resp = client.api(
+        req.method,
+        endpoint,
+        params=req.params,
+        content=req.content,
+        headers={**req.headers, **user_headers} or None,
+    )
+    if (text := render_response(resp)) is not None:
+        print(text)
+
+
+def read_source(path: str) -> str:
+    """Read a value from a file, or from stdin when ``path`` is ``-``."""
+    if path == "-":
+        return sys.stdin.read()
+    try:
+        return Path(path).read_text()
+    except OSError as exc:
+        raise AtlError(f"Could not read {path}: {exc}") from exc
+
+
+def resolve_field(source: FieldSource) -> JsonValue:
+    """Resolve a typed-field source to a value (reads a file for ``FromFile``)."""
+    match source:
+        case Inline(value):
+            return value
+        case FromFile(path):
+            return read_source(path)
 
 
 def cmd_login() -> None:
