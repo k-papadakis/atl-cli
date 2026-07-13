@@ -10,7 +10,7 @@ license-files = ["LICENSE"]
 authors = [
   { name = "Konstantinos Papadakis", email = "k.i.papadakis@gmail.com" },
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 keywords = ["atlassian", "jira", "confluence", "cli", "markdown", "terminal"]
 # No "License ::" classifier: PyPI rejects it alongside the SPDX `license` above.
 classifiers = [
@@ -19,10 +19,18 @@ classifiers = [
   "Intended Audience :: Developers",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
   "Topic :: Utilities",
 ]
-dependencies = ["httpx", "keyring", "markdownify", "pydantic>=2.13.4", "typer"]
+dependencies = [
+  "httpx==0.28.1",
+  "keyring==25.7.0",
+  "markdownify==1.2.3",
+  "pydantic==2.13.4",
+  "typer==0.26.8",
+]
 
 [project.urls]
 Homepage = "https://github.com/k-papadakis/atl-cli"
@@ -52,19 +60,19 @@ testpaths = ["tests"]
 # Ruff upgrade can't silently enable new rules. E/F/W are Ruff's defaults, spelt
 # out here rather than left implicit.
 select = [
-    "E",    # pycodestyle errors: PEP-8 layout, `== None`, bare `except`
-    "W",    # pycodestyle warnings (E501/line-length left to the formatter)
-    "F",    # Pyflakes: undefined names, unused imports/vars, dead f-strings
-    "I",    # isort: import grouping and ordering
-    "UP",   # pyupgrade: modern idioms for our requires-python floor (3.14)
-    "B",    # flake8-bugbear: likely bugs (mutable defaults, closure captures)
-    "SIM",  # flake8-simplify: collapse needless if/else and nesting
-    "RUF",  # Ruff's own lints: unused noqa, mutable dataclass defaults, ...
-    "C4",   # flake8-comprehensions: drop wasteful intermediate list()/dict()
-    "PIE",  # flake8-pie: misc dead weight (needless pass, `return None`, ...)
-    "PGH",  # pygrep-hooks: ban blanket `# type: ignore` / `# noqa` (name the code)
-    "PERF", # Perflint: manual loops that should be extend()/comprehensions
-    "TID",  # flake8-tidy-imports: no relative imports (we use absolute already)
+  "E",    # pycodestyle errors: PEP-8 layout, `== None`, bare `except`
+  "W",    # pycodestyle warnings (E501/line-length left to the formatter)
+  "F",    # Pyflakes: undefined names, unused imports/vars, dead f-strings
+  "I",    # isort: import grouping and ordering
+  "UP",   # pyupgrade: modern idioms for our requires-python floor (3.12)
+  "B",    # flake8-bugbear: likely bugs (mutable defaults, closure captures)
+  "SIM",  # flake8-simplify: collapse needless if/else and nesting
+  "RUF",  # Ruff's own lints: unused noqa, mutable dataclass defaults, ...
+  "C4",   # flake8-comprehensions: drop wasteful intermediate list()/dict()
+  "PIE",  # flake8-pie: misc dead weight (needless pass, `return None`, ...)
+  "PGH",  # pygrep-hooks: ban blanket `# type: ignore` / `# noqa` (name the code)
+  "PERF", # Perflint: manual loops that should be extend()/comprehensions
+  "TID",  # flake8-tidy-imports: no relative imports (we use absolute already)
 ]
 # Line length belongs to the formatter, which won't split string literals; every
 # major Ruff user (httpx, pydantic, Typer, Ruff itself) ignores E501 for this.
