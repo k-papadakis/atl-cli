@@ -1,6 +1,7 @@
 [project]
 # Distributed as "atl-cli" ("atl" is taken on PyPI); the package imports as
-# `atl_cli`, but the installed command stays `atl` via [project.scripts] below.
+# `atl_cli`. [project.scripts] below installs both `atl` (short, everyday
+# command) and `atl-cli` (so `uvx atl-cli` resolves without `--from`).
 name = "atl-cli"
 version = "0.2.0"
 description = "Render Atlassian (Jira + Confluence) content as clean Markdown in the terminal."
@@ -39,6 +40,7 @@ Issues = "https://github.com/k-papadakis/atl-cli/issues"
 
 [project.scripts]
 atl = "atl_cli.cli:main"
+atl-cli = "atl_cli.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.28,<0.12.0"]

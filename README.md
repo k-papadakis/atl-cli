@@ -17,7 +17,7 @@ token — reads or writes.
 uv tool install atl-cli
 ```
 
-This installs the `atl` command.
+This installs the `atl` command (also installed as `atl-cli`).
 
 ## Authentication
 
