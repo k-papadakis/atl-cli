@@ -5,9 +5,11 @@ from pathlib import Path
 
 PROG = "atl"
 
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "atl"
+CONFIG_DIR = (
+    Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "atl-cli"
+)
 CRED_FILE = CONFIG_DIR / "credentials.json"
-KEYRING_SERVICE = "atl"
+KEYRING_SERVICE = "atl-cli"
 
 HTTP_TIMEOUT = 30.0
 

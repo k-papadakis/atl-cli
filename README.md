@@ -26,7 +26,7 @@ and an [API token](https://id.atlassian.com/manage-profile/security/api-tokens),
 then verifies them before saving.
 
 - Non-secret metadata (site URL and username) is written to
-  `~/.config/atl/credentials.json` (mode 600; honors `XDG_CONFIG_HOME`).
+  `~/.config/atl-cli/credentials.json` (mode 600; honors `XDG_CONFIG_HOME`).
 - The API token is stored in your OS keyring; if no keyring backend is available
   it falls back into that same mode-600 file.
 
