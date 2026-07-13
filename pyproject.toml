@@ -2,7 +2,7 @@
 # Distributed as "atl-cli" ("atl" is taken on PyPI); the package imports as
 # `atl_cli`, but the installed command stays `atl` via [project.scripts] below.
 name = "atl-cli"
-version = "0.1.1"
+version = "0.2.0"
 description = "Render Atlassian (Jira + Confluence) content as clean Markdown in the terminal."
 readme = "README.md"
 license = "MIT"
