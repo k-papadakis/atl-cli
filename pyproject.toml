@@ -3,7 +3,7 @@
 # `atl_cli`, but the installed command stays `atl` via [project.scripts] below.
 name = "atl-cli"
 version = "0.1.0"
-description = "Fetch, render and search Atlassian (Jira + Confluence) content in the terminal."
+description = "Render Atlassian (Jira + Confluence) content as clean Markdown in the terminal."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

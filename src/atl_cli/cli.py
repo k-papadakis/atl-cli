@@ -31,7 +31,7 @@ err_console = Console(stderr=True)
 # `help_option_names` set on the root context is inherited by every subcommand,
 # so declaring it once here covers `atl`, `atl jira view`, ... alike.
 app = typer.Typer(
-    help="Fetch, render and search Atlassian (Jira + Confluence) content.",
+    help="Render Atlassian (Jira + Confluence) content as clean Markdown in the terminal.",
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
@@ -97,7 +97,9 @@ OutputPath = Annotated[
 Method = Annotated[
     str | None,
     typer.Option(
-        "-X", "--method", help="HTTP method (default: GET, or POST with a body)"
+        "-X",
+        "--method",
+        help="HTTP method (default: GET, or POST once a field or --input is set)",
     ),
 ]
 RawField = Annotated[
