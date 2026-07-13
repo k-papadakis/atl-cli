@@ -2,13 +2,17 @@
 request planner. No I/O -- file/stdin reads and the HTTP call live in `cmd_api`.
 """
 
+import pytest
+
 from atl_cli.commands import (
     FromFile,
     Inline,
     coerce_field,
+    normalize_base_url,
     plan_request,
     typed_source,
 )
+from atl_cli.errors import AtlError
 
 
 def test_coerce_field_applies_gh_type_magic() -> None:
@@ -61,3 +65,30 @@ def test_plan_request_raw_body_wins_and_pushes_fields_to_the_query() -> None:
     assert req.content == b'{"body": 1}'
     assert req.params == {"notify": "false"}
     assert req.headers["Content-Type"] == "application/json"
+
+
+def test_normalize_base_url_strips_trailing_slash_and_wiki_suffix() -> None:
+    """A valid site URL is reduced to its bare host root, dropping /wiki and slashes."""
+    assert (
+        normalize_base_url("https://acme.atlassian.net") == "https://acme.atlassian.net"
+    )
+    assert (
+        normalize_base_url("  https://acme.atlassian.net/  ")
+        == "https://acme.atlassian.net"
+    )
+    assert (
+        normalize_base_url("https://acme.atlassian.net/wiki")
+        == "https://acme.atlassian.net"
+    )
+    assert (
+        normalize_base_url("https://acme.atlassian.net/wiki/")
+        == "https://acme.atlassian.net"
+    )
+    assert normalize_base_url("http://localhost:8080") == "http://localhost:8080"
+
+
+def test_normalize_base_url_rejects_non_http_urls() -> None:
+    """A bare host, a non-http scheme, a scheme with no host, or a blank all fail fast."""
+    for bad in ("acme.atlassian.net", "ftp://acme.atlassian.net", "https://", "   "):
+        with pytest.raises(AtlError):
+            _ = normalize_base_url(bad)

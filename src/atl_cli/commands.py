@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import httpx
-from pydantic import JsonValue
+from pydantic import HttpUrl, JsonValue, TypeAdapter, ValidationError
 
 from atl_cli.account import (
     load_credentials,
@@ -242,21 +242,38 @@ def resolve_field(source: FieldSource) -> JsonValue:
             return read_source(path)
 
 
-def cmd_login() -> None:
-    base_url = input("Atlassian site URL (e.g. 'https://mycompany.atlassian.net'): ")
-    username = input("Atlassian email/username: ")
-    if not base_url or not username:
-        raise AtlError("Site URL and username are required.")
+def normalize_base_url(raw: str) -> str:
+    """Validate a site URL and normalize it to its bare host root.
 
-    # Normalize to the bare site host so both the Jira ('/rest/...') and
-    # Confluence ('/wiki/rest/...') base URLs can be derived from it.
-    base_url = base_url.strip().rstrip("/").removesuffix("/wiki")
+    Validation is delegated to pydantic's HttpUrl (requires an http(s):// URL
+    with a host). We keep pydantic for validation only and normalize the raw
+    string ourselves -- HttpUrl would rewrite a host-only URL with a trailing
+    slash. Strips a trailing slash and a '/wiki' suffix so both the Jira
+    ('/rest/...') and Confluence ('/wiki/rest/...') base URLs derive from it.
+    """
+    url = raw.strip()
+    try:
+        _ = TypeAdapter(HttpUrl).validate_python(url)
+    except ValidationError as exc:
+        raise AtlError(
+            f"Invalid site URL {url!r}; expected a full URL like "
+            + "'https://mycompany.atlassian.net'."
+        ) from exc
+    return url.rstrip("/").removesuffix("/wiki")
+
+
+def cmd_login() -> None:
+    base_url = normalize_base_url(
+        input("Atlassian site URL (e.g. 'https://mycompany.atlassian.net'): ")
+    )
+    username = input("Atlassian email/username: ").strip()
+    if not username:
+        raise AtlError("Username is required.")
 
     token = getpass.getpass("Atlassian API token: ")
     if not token:
         raise AtlError("API token is required.")
 
-    username = username.strip()
     # Verify the credentials against the authenticated "who am I" endpoint before
     # persisting, so we never store a token that doesn't work.
     client = AtlassianClient(Credentials(base_url, username, token))
