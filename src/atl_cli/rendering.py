@@ -96,6 +96,18 @@ class SearchTable:
     more: bool
 
 
+def search_summary(count: int, more: bool, link_pattern: str) -> str:
+    """One-line result summary carrying the link pattern once.
+
+    The search tables omit the per-row URL column because each row's link is
+    derivable; this line supplies the pattern instead. `link_pattern` is a whole
+    URL template (e.g. 'https://site/browse/<KEY>'): substitute <KEY>/<ID> to
+    rebuild any row's link.
+    """
+    suffix = " (more available; raise --limit)" if more else ""
+    return f"{count} result(s){suffix} · links: {link_pattern}"
+
+
 def format_table(headers: list[str], rows: list[list[str]]) -> str:
     widths = [max(len(row[i]) for row in (headers, *rows)) for i in range(len(headers))]
 
@@ -275,18 +287,19 @@ def _jira_comments(comments: CommentPage) -> str:
     )
 
 
-def jira_search_table(base_url: str, page: Page[SearchIssue]) -> SearchTable:
+def jira_search_table(page: Page[SearchIssue]) -> SearchTable:
+    # No URL column: a row's link is derivable from KEY, so the command layer
+    # prints the '{base}/browse/<KEY>' pattern once instead of on every row.
     rows: list[list[str]] = [
         [
             text(issue.key),
             named(issue.fields.status),
             user_name(issue.fields.assignee, "Unassigned"),
             text(issue.fields.summary),
-            f"{base_url}/browse/{text(issue.key)}",
         ]
         for issue in page.items
     ]
-    table = format_table(["KEY", "STATUS", "ASSIGNEE", "SUMMARY", "URL"], rows)
+    table = format_table(["KEY", "STATUS", "ASSIGNEE", "SUMMARY"], rows)
     return SearchTable(table=table, count=len(page.items), more=page.more)
 
 
@@ -340,17 +353,12 @@ def render_confluence_page(page: ConfluencePage, comments: ConfluenceComments) -
     )
 
 
-def confluence_search_table(base_url: str, page: Page[SearchPage]) -> SearchTable:
-    rows: list[list[str]] = []
-    for result in page.items:
-        page_id = text(result.id)
-        rows.append(
-            [
-                page_id,
-                text(result.type),
-                text(result.title),
-                f"{base_url}/wiki/pages/viewpage.action?pageId={page_id}",
-            ]
-        )
-    table = format_table(["ID", "TYPE", "TITLE", "URL"], rows)
+def confluence_search_table(page: Page[SearchPage]) -> SearchTable:
+    # No URL column: a row's link is derivable from ID, so the command layer
+    # prints the viewpage pattern once instead of on every row.
+    rows: list[list[str]] = [
+        [text(result.id), text(result.type), text(result.title)]
+        for result in page.items
+    ]
+    table = format_table(["ID", "TYPE", "TITLE"], rows)
     return SearchTable(table=table, count=len(page.items), more=page.more)

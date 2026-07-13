@@ -35,6 +35,7 @@ from atl_cli.rendering import (
     jira_search_table,
     render_confluence_page,
     render_jira_issue,
+    search_summary,
 )
 from atl_cli.schemas import SearchIssue
 
@@ -54,11 +55,6 @@ def open_url(url: str) -> None:
 
 def print_json(data: JsonValue) -> None:
     print(json.dumps(data, indent=2))
-
-
-def report_count(count: int, more: bool) -> None:
-    suffix = " (more available; raise --limit)" if more else ""
-    print(f"{count} result(s){suffix}", file=sys.stderr)
 
 
 # --------------------------------------------------------------------------- #
@@ -348,8 +344,9 @@ def cmd_jira_search(
         case OutputFormat.JSON:
             print_json(client.jira.search_json(jql, limit))
         case OutputFormat.TEXT:
-            st = jira_search_table(base_url, client.jira.search(jql, limit))
-            report_count(st.count, st.more)
+            st = jira_search_table(client.jira.search(jql, limit))
+            summary = search_summary(st.count, st.more, f"{base_url}/browse/<KEY>")
+            print(summary, file=sys.stderr)
             print(st.table)
 
 
@@ -386,8 +383,11 @@ def cmd_confluence_search(
         case OutputFormat.JSON:
             print_json(client.confluence.search_json(cql, limit))
         case OutputFormat.TEXT:
-            st = confluence_search_table(base_url, client.confluence.search(cql, limit))
-            report_count(st.count, st.more)
+            st = confluence_search_table(client.confluence.search(cql, limit))
+            summary = search_summary(
+                st.count, st.more, f"{base_url}/wiki/pages/viewpage.action?pageId=<ID>"
+            )
+            print(summary, file=sys.stderr)
             print(st.table)
 
 

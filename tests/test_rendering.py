@@ -195,7 +195,7 @@ def test_status_history_is_sorted_and_filtered() -> None:
 
 
 def test_jira_search_table() -> None:
-    """Issues map to the right columns, with an Unassigned fallback and a URL."""
+    """Issues map to the right columns, with an Unassigned fallback and no URL."""
     page = Page(
         [
             SearchIssue.model_validate(
@@ -214,9 +214,13 @@ def test_jira_search_table() -> None:
         ],
         more=False,
     )
-    st = jira_search_table("https://site", page)
-    assert "SYS-1  Open    Unassigned  A" in st.table
-    assert "https://site/browse/SYS-2" in st.table
+    st = jira_search_table(page)
+    # Exact table: four columns (no derivable URL), aligned, Unassigned fallback.
+    assert st.table.splitlines() == [
+        "KEY    STATUS  ASSIGNEE    SUMMARY",
+        "SYS-1  Open    Unassigned  A",
+        "SYS-2  Done    Ada         B",
+    ]
 
 
 def test_render_jira_epic_children() -> None:
@@ -313,11 +317,11 @@ def test_confluence_page_without_body_raises() -> None:
 
 
 def test_confluence_search_table() -> None:
-    """Results map to id/type/title columns plus a viewpage URL."""
+    """Results map to id/type/title columns, with no derivable URL column."""
     page = Page(
         [SearchPage.model_validate({"id": "10", "type": "page", "title": "T"})],
         more=False,
     )
-    st = confluence_search_table("https://site", page)
-    assert "10  page  T" in st.table
-    assert "https://site/wiki/pages/viewpage.action?pageId=10" in st.table
+    st = confluence_search_table(page)
+    # Exact table: three columns, no derivable viewpage URL.
+    assert st.table.splitlines() == ["ID  TYPE  TITLE", "10  page  T"]
