@@ -1,5 +1,6 @@
 """The Typer command-line interface: thin adapters over the command layer."""
 
+from http import HTTPMethod
 from pathlib import Path
 from typing import Annotated
 
@@ -90,7 +91,7 @@ OutputPath = Annotated[
 
 # `atl api` options, named after their `gh api` counterparts.
 Method = Annotated[
-    str | None,
+    HTTPMethod | None,
     typer.Option(
         "-X",
         "--method",

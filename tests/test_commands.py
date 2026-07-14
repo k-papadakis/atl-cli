@@ -2,6 +2,8 @@
 request planner. No I/O -- file/stdin reads and the HTTP call live in `cmd_api`.
 """
 
+from http import HTTPMethod
+
 import pytest
 
 from atl_cli.commands import (
@@ -38,14 +40,12 @@ def test_plan_request_defaults_to_get_then_post_when_there_is_a_payload() -> Non
     assert plan_request(None, {}, None).method == "GET"
     assert plan_request(None, {"a": "b"}, None).method == "POST"
     assert plan_request(None, {}, b"{}").method == "POST"
-    assert (
-        plan_request("delete", {}, None).method == "DELETE"
-    )  # explicit wins, upper-cased
+    assert plan_request(HTTPMethod.DELETE, {}, None).method == "DELETE"  # explicit wins
 
 
 def test_plan_request_routes_get_fields_to_the_query_string() -> None:
     """A GET carries fields as query params, never a body; bools render as true/false."""
-    req = plan_request("GET", {"expand": "groups", "active": True}, None)
+    req = plan_request(HTTPMethod.GET, {"expand": "groups", "active": True}, None)
     assert req.params == {"expand": "groups", "active": "true"}
     assert req.content is None
     assert "Content-Type" not in req.headers
@@ -53,7 +53,7 @@ def test_plan_request_routes_get_fields_to_the_query_string() -> None:
 
 def test_plan_request_serializes_non_get_fields_as_a_json_body() -> None:
     """A non-GET with fields sends a JSON body and defaults the Content-Type."""
-    req = plan_request("POST", {"name": "x"}, None)
+    req = plan_request(HTTPMethod.POST, {"name": "x"}, None)
     assert req.params is None
     assert req.content == b'{"name": "x"}'
     assert req.headers["Content-Type"] == "application/json"
@@ -61,7 +61,7 @@ def test_plan_request_serializes_non_get_fields_as_a_json_body() -> None:
 
 def test_plan_request_raw_body_wins_and_pushes_fields_to_the_query() -> None:
     """`--input` owns the body; fields fall back to the query string regardless of method."""
-    req = plan_request("PUT", {"notify": False}, b'{"body": 1}')
+    req = plan_request(HTTPMethod.PUT, {"notify": False}, b'{"body": 1}')
     assert req.content == b'{"body": 1}'
     assert req.params == {"notify": "false"}
     assert req.headers["Content-Type"] == "application/json"

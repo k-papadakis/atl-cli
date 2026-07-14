@@ -8,6 +8,7 @@ import sys
 import webbrowser
 from dataclasses import dataclass
 from enum import StrEnum
+from http import HTTPMethod
 from pathlib import Path
 from typing import cast
 
@@ -144,7 +145,7 @@ class Request:
 
 
 def plan_request(
-    method: str | None, fields: Fields, input_body: bytes | None
+    method: HTTPMethod | None, fields: Fields, input_body: bytes | None
 ) -> Request:
     """Decide method, query vs body, and headers by gh's rules (pure).
 
@@ -154,13 +155,13 @@ def plan_request(
     them as a JSON body. Atlassian bodies are JSON, so a body defaults the
     Content-Type (a user ``-H`` still overrides it).
     """
-    resolved = (
-        method or ("POST" if fields or input_body is not None else "GET")
-    ).upper()
+    resolved = method or (
+        HTTPMethod.POST if fields or input_body is not None else HTTPMethod.GET
+    )
     match (input_body, resolved):
         case (bytes() as body, _):
             return Request(resolved, _query(fields), body, JSON_HEADER)
-        case (None, "GET" | "HEAD"):
+        case (None, HTTPMethod.GET | HTTPMethod.HEAD):
             return Request(resolved, _query(fields), None, {})
         case (None, _) if fields:
             return Request(resolved, None, json.dumps(fields).encode(), JSON_HEADER)
@@ -187,7 +188,7 @@ def cmd_api(
     client: AtlassianClient,
     endpoint: str,
     *,
-    method: str | None,
+    method: HTTPMethod | None,
     raw_fields: list[str],
     typed_fields: list[str],
     input_source: str | None,
