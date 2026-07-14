@@ -73,13 +73,6 @@ def _connect() -> AtlassianClient:
     return AtlassianClient(load_credentials())
 
 
-def _validate_page_id(value: str) -> str:
-    """Accept only a numeric Confluence page id (kept as str for leading zeros)."""
-    if not value.isdigit():
-        raise typer.BadParameter(f"page id must be numeric, got {value!r}")
-    return value
-
-
 # Shared option annotations.
 Web = Annotated[
     bool, typer.Option("--web", help="open in a browser instead of rendering")
@@ -183,14 +176,12 @@ def jira_download_attachment(
 
 @conf_app.command("view")
 def confluence_view(
-    page_id: Annotated[
-        str, typer.Argument(help="numeric page id", callback=_validate_page_id)
-    ],
+    page_id: Annotated[int, typer.Argument(min=1, help="numeric page id")],
     web: Web = False,
     output: Output = OutputFormat.TEXT,
 ) -> None:
     """View a page."""
-    cmd_confluence_view(_connect(), page_id, web=web, output=output)
+    cmd_confluence_view(_connect(), str(page_id), web=web, output=output)
 
 
 @conf_app.command("search")
@@ -207,7 +198,10 @@ def confluence_search(
 @conf_app.command("download-attachment")
 def confluence_download_attachment(
     attachment_id: Annotated[
-        str, typer.Argument(help="attachment id (shown in `atl confluence view`)")
+        str,
+        typer.Argument(
+            help="attachment id, e.g. 'att123456' (shown in `atl confluence view`)"
+        ),
     ],
     output: OutputPath = None,
 ) -> None:
