@@ -85,7 +85,9 @@ Web = Annotated[
     bool, typer.Option("--web", help="open in a browser instead of rendering")
 ]
 Output = Annotated[OutputFormat, typer.Option("-o", "--output", help="output format")]
-Limit = Annotated[int | None, typer.Option(help="max results to return (default: all)")]
+Limit = Annotated[
+    int | None, typer.Option(min=1, help="max results to return (default: all)")
+]
 OutputPath = Annotated[
     Path | None,
     typer.Option(
