@@ -93,14 +93,25 @@ def search_pages_url(base_url: str, cql: str) -> str:
     return f"{base_url}/wiki/search?{httpx.QueryParams(cql=cql)}"
 
 
+def _origin(url: str) -> tuple[str, str, int | None]:
+    """Return a URL's canonical origin (httpx.URL already lowercases the host
+    and strips the scheme's default port, so no manual normalization needed).
+    """
+    parsed = httpx.URL(url)
+    return parsed.scheme, parsed.host, parsed.port
+
+
 def resolve_endpoint(base_url: str, endpoint: str) -> str:
     """Resolve a raw-passthrough endpoint against the site root.
 
-    A full URL is used verbatim; anything else is joined to ``base_url`` (a
-    leading slash is optional), so the caller types the real REST path -- Jira
-    (``/rest/...``) and Confluence (``/wiki/...``) alike -- version included.
+    An absolute URL must have the configured site's origin. Anything else is
+    joined to ``base_url`` (a leading slash is optional), so the caller types
+    the real REST path -- Jira (``/rest/...``) and Confluence (``/wiki/...``)
+    alike -- version included.
     """
     if endpoint.startswith(("http://", "https://")):
+        if _origin(endpoint) != _origin(base_url):
+            raise AtlError("API endpoint must use the configured site's origin.")
         return endpoint
     return f"{base_url}/{endpoint.removeprefix('/')}"
 

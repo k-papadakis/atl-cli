@@ -1,8 +1,9 @@
 """Tests for the pure client helpers: error message extraction, cursor/filename
-parsing, and web-search URL builders.
+parsing, endpoint validation, and web-search URL builders.
 """
 
 import httpx
+import pytest
 
 from atl_cli.client import (
     cursor_from,
@@ -12,6 +13,7 @@ from atl_cli.client import (
     search_issues_url,
     search_pages_url,
 )
+from atl_cli.errors import AtlError
 
 
 def test_error_message_joins_general_and_field_errors() -> None:
@@ -72,7 +74,21 @@ def test_resolve_endpoint_joins_paths_to_the_site_root() -> None:
     )
 
 
-def test_resolve_endpoint_passes_full_urls_through() -> None:
-    """A full URL is used verbatim (e.g. a paginated _links.next or another site)."""
-    url = "https://other.atlassian.net/rest/api/3/field"
+def test_resolve_endpoint_passes_same_origin_full_urls_through() -> None:
+    """A same-origin full URL is accepted for callers that need an absolute path."""
+    url = "https://site/rest/api/3/field"
     assert resolve_endpoint("https://site", url) == url
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "https://other.atlassian.net/rest/api/3/field",
+        "http://site/rest/api/3/field",
+        "https://site:8443/rest/api/3/field",
+    ],
+)
+def test_resolve_endpoint_rejects_cross_origin_urls(endpoint: str) -> None:
+    """Configured credentials must never be sent to a different origin."""
+    with pytest.raises(AtlError, match="configured site's origin"):
+        _ = resolve_endpoint("https://site", endpoint)

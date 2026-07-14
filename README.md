@@ -9,7 +9,8 @@ command has an `--output json` mode for scripting.
 For anything the curated commands don't cover, `atl api` is a raw, authenticated
 passthrough to the Atlassian REST API, modeled on `gh api`: type the real Jira
 (`/rest/...`) or Confluence (`/wiki/...`) path against your configured host and
-token — reads or writes.
+token — reads or writes. Absolute endpoints are allowed only for that configured
+site, so the stored credentials cannot be sent to another origin.
 
 ## Install
 
