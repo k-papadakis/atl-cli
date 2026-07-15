@@ -9,7 +9,9 @@ live here; `commands.py` just orchestrates and prints.
 import json
 import re
 import urllib.parse
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import cached_property
 from typing import ClassVar, cast
 
 import httpx
@@ -17,8 +19,9 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from atl_cli.config import HTTP_TIMEOUT, SEARCH_PAGE_SIZE
 from atl_cli.errors import AtlError
-from atl_cli.models import Credentials, Page
+from atl_cli.models import Credentials, Page, Product
 from atl_cli.schemas import (
+    AccessibleResource,
     ApiError,
     CommentPage,
     ConfluenceAttachment,
@@ -30,9 +33,14 @@ from atl_cli.schemas import (
     RemoteLink,
     SearchIssue,
     SearchPage,
+    TenantInfo,
     User,
     WorklogPage,
 )
+
+# Scoped API tokens reach the REST API through this gateway rather than the site
+# URL (which returns 401 for them); classic tokens keep using the site URL.
+GATEWAY_HOST = "api.atlassian.com"
 
 type Params = dict[str, str | int]
 type Headers = dict[str, str]
@@ -101,19 +109,157 @@ def _origin(url: str) -> tuple[str, str, int | None]:
     return parsed.scheme, parsed.host, parsed.port
 
 
-def resolve_endpoint(base_url: str, endpoint: str) -> str:
-    """Resolve a raw-passthrough endpoint against the site root.
+def build_gateway_base(product: Product, cloud_id: str) -> str:
+    """The scoped-token REST root for a product on a site's cloud instance."""
+    return f"https://{GATEWAY_HOST}/ex/{product.value}/{cloud_id}"
 
-    An absolute URL must have the configured site's origin. Anything else is
-    joined to ``base_url`` (a leading slash is optional), so the caller types
-    the real REST path -- Jira (``/rest/...``) and Confluence (``/wiki/...``)
-    alike -- version included.
+
+def infer_product(endpoint: str, override: Product | None = None) -> Product:
+    """Which product an ``atl api`` endpoint targets.
+
+    Confluence paths live under ``/wiki`` (site) or ``/ex/confluence/``
+    (gateway); everything else -- Jira ``/rest/api/3``, Agile, ... -- defaults to
+    Jira. An explicit ``--product`` override always wins.
+    """
+    if override is not None:
+        return override
+    path = (
+        httpx.URL(endpoint).path
+        if endpoint.startswith(("http://", "https://"))
+        else endpoint
+    )
+    normalized = path.lstrip("/").lower()
+    if (
+        normalized.startswith("wiki/")
+        or normalized == "wiki"
+        or "ex/confluence/" in normalized
+    ):
+        return Product.CONFLUENCE
+    return Product.JIRA
+
+
+def choose_api_product(
+    endpoint: str, override: Product | None, available: list[Product]
+) -> Product:
+    """Pick the credential for a raw ``atl api`` call.
+
+    An explicit ``--product`` wins. With a single credential configured, use it
+    for any path (a classic token covers both products, so there is nothing to
+    disambiguate). Otherwise infer the product from the endpoint path.
+    """
+    if override is not None:
+        return override
+    if len(available) == 1:
+        return available[0]
+    return infer_product(endpoint)
+
+
+def resolve_endpoint(creds: Credentials, endpoint: str) -> str:
+    """Resolve a raw-passthrough endpoint against the product's REST root.
+
+    An absolute URL must match either the configured site's origin or the
+    scoped-token gateway origin the credential uses, so the stored token is never
+    sent elsewhere. Anything else is joined to the credential's ``base_url`` (a
+    leading slash is optional) -- the site root in classic mode, the gateway root
+    in scoped mode -- so the caller types the real REST path, version included.
     """
     if endpoint.startswith(("http://", "https://")):
-        if _origin(endpoint) != _origin(base_url):
-            raise AtlError("API endpoint must use the configured site's origin.")
+        allowed = {_origin(creds.base_url)}
+        if creds.site_url:
+            allowed.add(_origin(creds.site_url))
+        if _origin(endpoint) not in allowed:
+            raise AtlError(
+                "API endpoint must use the configured site's origin "
+                + "(or, for a scoped token, its api.atlassian.com gateway)."
+            )
         return endpoint
-    return f"{base_url}/{endpoint.removeprefix('/')}"
+    return f"{creds.base_url}/{endpoint.removeprefix('/')}"
+
+
+def resolve_cloud_id(
+    site_url: str, username: str | None = None, token: str | None = None
+) -> str:
+    """Resolve a site's cloudId, needed to build scoped-token gateway URLs.
+
+    Prefers the site's unauthenticated ``_edge/tenant_info`` endpoint (simplest,
+    no token). Falls back to the authenticated ``accessible-resources`` endpoint,
+    matching the site by origin, when the edge endpoint is blocked or absent.
+    Responses are treated as untrusted -- validated, never echoed.
+    """
+    try:
+        resp = httpx.get(
+            f"{site_url}/_edge/tenant_info",
+            timeout=HTTP_TIMEOUT,
+            follow_redirects=True,
+        )
+        _ = resp.raise_for_status()
+        info = TenantInfo.model_validate(resp.json())
+        if info.cloud_id:
+            return info.cloud_id
+    except (httpx.HTTPError, json.JSONDecodeError, ValidationError):
+        pass
+
+    if username and token:
+        try:
+            resp = httpx.get(
+                f"https://{GATEWAY_HOST}/oauth/token/accessible-resources",
+                auth=(username, token),
+                timeout=HTTP_TIMEOUT,
+                follow_redirects=True,
+            )
+            _ = resp.raise_for_status()
+            resources = TypeAdapter(list[AccessibleResource]).validate_python(
+                resp.json()
+            )
+            for resource in resources:
+                if (
+                    resource.id
+                    and resource.url
+                    and _origin(resource.url) == _origin(site_url)
+                ):
+                    return resource.id
+        except (httpx.HTTPError, json.JSONDecodeError, ValidationError):
+            pass
+
+    raise AtlError(
+        f"Could not determine the cloudId for {site_url}; "
+        + "the scoped token could not be configured."
+    )
+
+
+def _myself_url(creds: Credentials) -> str:
+    """The product's who-am-I endpoint, used to verify a token at login."""
+    if creds.product is Product.CONFLUENCE:
+        return f"{creds.base_url}/wiki/rest/api/user/current"
+    return f"{creds.base_url}/rest/api/3/myself"
+
+
+def probe(creds: Credentials) -> User:
+    """Call the product's who-am-I to verify a candidate credential.
+
+    Lets ``httpx.HTTPStatusError`` propagate (carrying the response, so the
+    caller can branch on the status code -- a 401/403 against the site means the
+    token may be scoped) and maps transport/decoding failures to ``AtlError``.
+    """
+    try:
+        resp = httpx.request(
+            "GET",
+            _myself_url(creds),
+            auth=(creds.username, creds.token),
+            timeout=HTTP_TIMEOUT,
+            follow_redirects=True,
+        )
+        _ = resp.raise_for_status()
+    except httpx.HTTPStatusError:
+        raise
+    except httpx.HTTPError as exc:
+        raise AtlError(
+            f"Could not reach {creds.product.value} to verify the token: {exc}"
+        ) from exc
+    try:
+        return User.model_validate(resp.json())
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise AtlError("Unexpected response while verifying the token.") from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -377,6 +523,12 @@ class ConfluenceApi:
     def _search_url(self) -> str:
         return f"{self._api()}/content/search"
 
+    def get_myself(self) -> User:
+        """Fetch the authenticated user; used to prove a token actually works."""
+        return _fetch_model(
+            self.creds, f"{self._api()}/user/current", User, label="Confluence"
+        )
+
     def get_page(self, page_id: str) -> ConfluencePage:
         return _fetch_model(
             self.creds,
@@ -464,32 +616,50 @@ class ConfluenceApi:
 
 @dataclass
 class AtlassianClient:
-    creds: Credentials
-    jira: JiraApi = field(init=False)
-    confluence: ConfluenceApi = field(init=False)
+    """Facade over the two product surfaces.
 
-    def __post_init__(self) -> None:
-        self.jira = JiraApi(self.creds)
-        self.confluence = ConfluenceApi(self.creds)
+    Credentials are loaded per product, lazily and on demand: running a Jira
+    command never requires Confluence to be configured, and vice versa. A
+    missing product credential surfaces a clear per-product error only when that
+    product is actually used.
+    """
+
+    load_credentials: Callable[[Product], Credentials]
+    available_products: Callable[[], list[Product]]
+
+    @cached_property
+    def jira(self) -> JiraApi:
+        return JiraApi(self.load_credentials(Product.JIRA))
+
+    @cached_property
+    def confluence(self) -> ConfluenceApi:
+        return ConfluenceApi(self.load_credentials(Product.CONFLUENCE))
 
     def api(
         self,
         method: str,
         endpoint: str,
         *,
+        product: Product | None = None,
         params: Params | None = None,
         content: bytes | None = None,
         headers: Headers | None = None,
     ) -> httpx.Response:
-        """Raw passthrough: an arbitrary authenticated request to the site.
+        """Raw passthrough: an arbitrary authenticated request.
 
-        Backs `atl api`; the endpoint is resolved against the site root so any
-        REST surface (Jira, Confluence, Agile, v2, ...) is reachable.
+        Backs `atl api`. With one credential configured it is used for any path;
+        with both, the product is inferred from the endpoint (or forced with
+        ``--product``). The endpoint is then resolved against that product's REST
+        root -- the site root for a classic token, the gateway root for a scoped
+        one -- so any REST surface (Jira, Confluence, Agile, v2, ...) is reachable.
         """
+        chosen = choose_api_product(endpoint, product, self.available_products())
+        surface = self.jira if chosen is Product.JIRA else self.confluence
+        creds = surface.creds
         return _request(
-            self.creds,
+            creds,
             method,
-            resolve_endpoint(self.creds.base_url, endpoint),
+            resolve_endpoint(creds, endpoint),
             params=params,
             content=content,
             headers=headers,

@@ -9,12 +9,14 @@ import pytest
 from atl_cli.commands import (
     FromFile,
     Inline,
+    build_credential,
     coerce_field,
     normalize_base_url,
     plan_request,
     typed_source,
 )
 from atl_cli.errors import AtlError
+from atl_cli.models import AuthMode, Product
 
 
 def test_coerce_field_applies_gh_type_magic() -> None:
@@ -92,3 +94,23 @@ def test_normalize_base_url_rejects_non_http_urls() -> None:
     for bad in ("acme.atlassian.net", "ftp://acme.atlassian.net", "https://", "   "):
         with pytest.raises(AtlError):
             _ = normalize_base_url(bad)
+
+
+def test_build_credential_uses_the_site_root_in_site_mode() -> None:
+    """A classic token talks to the site root; --web links use the same site."""
+    creds = build_credential(
+        Product.JIRA, "https://site", "ada", "t", AuthMode.SITE, None
+    )
+    assert creds.base_url == "https://site"
+    assert creds.mode is AuthMode.SITE
+    assert creds.web_base == "https://site"
+
+
+def test_build_credential_uses_the_gateway_root_in_gateway_mode() -> None:
+    """A scoped token talks to the gateway, but --web links still use the human site."""
+    creds = build_credential(
+        Product.CONFLUENCE, "https://site", "ada", "t", AuthMode.GATEWAY, "cid"
+    )
+    assert creds.base_url == "https://api.atlassian.com/ex/confluence/cid"
+    assert creds.cloud_id == "cid"
+    assert creds.web_base == "https://site"

@@ -8,7 +8,7 @@ import sys
 import webbrowser
 from dataclasses import dataclass
 from enum import StrEnum
-from http import HTTPMethod
+from http import HTTPMethod, HTTPStatus
 from pathlib import Path
 from typing import cast
 
@@ -16,6 +16,7 @@ import httpx
 from pydantic import HttpUrl, JsonValue, TypeAdapter, ValidationError
 
 from atl_cli.account import (
+    available_products,
     load_credentials,
     read_metadata,
     save_credentials,
@@ -23,14 +24,20 @@ from atl_cli.account import (
 )
 from atl_cli.client import (
     AtlassianClient,
+    ConfluenceApi,
     Headers,
+    JiraApi,
     Params,
+    build_gateway_base,
+    error_message,
+    probe,
+    resolve_cloud_id,
     search_issues_url,
     search_pages_url,
 )
 from atl_cli.config import CRED_FILE
 from atl_cli.errors import AtlError
-from atl_cli.models import Credentials, Page
+from atl_cli.models import AuthMode, Credentials, Page, Product, StoredCredential
 from atl_cli.rendering import (
     confluence_search_table,
     jira_search_table,
@@ -38,7 +45,7 @@ from atl_cli.rendering import (
     render_jira_issue,
     search_summary,
 )
-from atl_cli.schemas import SearchIssue
+from atl_cli.schemas import SearchIssue, User
 
 
 class OutputFormat(StrEnum):
@@ -193,6 +200,7 @@ def cmd_api(
     typed_fields: list[str],
     input_source: str | None,
     headers: list[str],
+    product: Product | None,
 ) -> None:
     # Pure parse first, then the edge: resolve @file/@- sources and --input.
     fields: Fields = dict(parse_pairs(raw_fields, "=", "field"))
@@ -212,6 +220,7 @@ def cmd_api(
     resp = client.api(
         req.method,
         endpoint,
+        product=product,
         params=req.params,
         content=req.content,
         headers={**req.headers, **user_headers} or None,
@@ -259,51 +268,152 @@ def normalize_base_url(raw: str) -> str:
     return url.rstrip("/").removesuffix("/wiki")
 
 
-def cmd_login() -> None:
-    base_url = normalize_base_url(
+def build_credential(
+    product: Product,
+    site: str,
+    username: str,
+    token: str,
+    mode: AuthMode,
+    cloud_id: str | None,
+) -> Credentials:
+    """Assemble a candidate credential, choosing the site vs gateway REST root
+    from the auth mode (pure)."""
+    base = (
+        site if mode is AuthMode.SITE else build_gateway_base(product, cloud_id or "")
+    )
+    return Credentials(
+        base_url=base,
+        username=username,
+        token=token,
+        product=product,
+        mode=mode,
+        site_url=site,
+        cloud_id=cloud_id,
+    )
+
+
+def _detect_credential(
+    product: Product, site: str, username: str, token: str
+) -> tuple[Credentials, User]:
+    """Verify the token and settle its auth mode, without persisting anything.
+
+    Probes the site URL first (a classic token). A 401/403 there means the token
+    may be scoped, so we resolve the cloudId and re-probe the gateway. Any other
+    failure aborts with nothing saved. Returns the working credential and the
+    verified user.
+    """
+    site_creds = build_credential(product, site, username, token, AuthMode.SITE, None)
+    try:
+        return site_creds, probe(site_creds)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code not in (
+            HTTPStatus.UNAUTHORIZED,
+            HTTPStatus.FORBIDDEN,
+        ):
+            raise AtlError(
+                f"Could not verify credentials; nothing was saved. {error_message(exc.response)}"
+            ) from exc
+    except AtlError as exc:
+        raise AtlError(
+            f"Could not verify credentials; nothing was saved. {exc}"
+        ) from exc
+
+    # The site rejected the token as unauthorized: it is likely a scoped token,
+    # which only works through the api.atlassian.com gateway.
+    cloud_id = resolve_cloud_id(site, username, token)
+    gw_creds = build_credential(
+        product, site, username, token, AuthMode.GATEWAY, cloud_id
+    )
+    try:
+        return gw_creds, probe(gw_creds)
+    except httpx.HTTPStatusError as exc:
+        raise AtlError(
+            f"Could not verify the scoped token; nothing was saved. {error_message(exc.response)}"
+        ) from exc
+    except AtlError as exc:
+        raise AtlError(
+            f"Could not verify the scoped token; nothing was saved. {exc}"
+        ) from exc
+
+
+def cmd_login(product: Product) -> None:
+    site = normalize_base_url(
         input("Atlassian site URL (e.g. 'https://mycompany.atlassian.net'): ")
     )
     username = input("Atlassian email/username: ").strip()
     if not username:
         raise AtlError("Username is required.")
 
-    token = getpass.getpass("Atlassian API token: ")
+    token = getpass.getpass(f"Atlassian API token ({product.value}): ")
     if not token:
         raise AtlError("API token is required.")
 
-    # Verify the credentials against the authenticated "who am I" endpoint before
-    # persisting, so we never store a token that doesn't work.
-    client = AtlassianClient(Credentials(base_url, username, token))
-    try:
-        me = client.jira.get_myself()
-    except AtlError as exc:
-        raise AtlError(
-            f"Could not verify credentials; nothing was saved. {exc}"
-        ) from exc
+    # Verify the credentials before persisting, so we never store a token that
+    # doesn't work -- and let the probe settle whether it is a classic or scoped
+    # token (site URL vs gateway).
+    creds, me = _detect_credential(product, site, username, token)
 
-    backend = save_credentials(base_url, username, token)
+    backend = save_credentials(
+        product,
+        base_url=creds.base_url,
+        site_url=creds.site_url,
+        username=username,
+        token=token,
+        mode=creds.mode,
+        cloud_id=creds.cloud_id,
+    )
     print(f"Verified as {me.display_name or username}.", file=sys.stderr)
     print(
-        f"Configuration saved to {CRED_FILE} (token backend: {backend.value})",
+        f"{product.value.capitalize()} credentials saved to {CRED_FILE} "
+        + f"(mode: {creds.mode.value}, token backend: {backend.value})",
         file=sys.stderr,
     )
 
 
-def cmd_status() -> None:
+def _verify_for_status(product: Product, cred: StoredCredential) -> str:
+    """Load the product's credential and confirm the token; return the display name."""
+    creds = load_credentials(product)
+    api = JiraApi(creds) if product is Product.JIRA else ConfluenceApi(creds)
+    me = api.get_myself()
+    return me.display_name or cred.username
+
+
+def cmd_status(product: Product) -> None:
     meta = read_metadata()
+    cred = meta.credentials.get(product)
+    if cred is None:
+        print(
+            f"Not logged in to {product.value}. "
+            + f"Run 'atl auth login {product.value}'."
+        )
+        return
     print(
-        f"Logged in to {meta.url} as {meta.username} "
-        + f"(token backend: {stored_backend(meta).value})"
+        f"Logged in to {cred.site_url or cred.url} as {cred.username} "
+        + f"(product: {product.value}, mode: {cred.mode.value}, "
+        + f"token backend: {stored_backend(cred).value})"
     )
-    me = AtlassianClient(load_credentials()).jira.get_myself()
-    print(f"Token verified — authenticated as {me.display_name or meta.username}.")
+    display = _verify_for_status(product, cred)
+    print(f"Token verified — authenticated as {display}.")
+
+
+def cmd_status_all() -> None:
+    """Show every configured product (for the top-level ``atl auth status``)."""
+    products = available_products()
+    if not products:
+        print(
+            "Not logged in. Run 'atl auth login jira' or "
+            + "'atl auth login confluence'."
+        )
+        return
+    for product in products:
+        cmd_status(product)
 
 
 def cmd_jira_view(
     client: AtlassianClient, key: str, *, web: bool, output: OutputFormat
 ) -> None:
     if web:
-        open_url(f"{client.creds.base_url}/browse/{key}")
+        open_url(f"{client.jira.creds.web_base}/browse/{key}")
         return
 
     match output:
@@ -336,7 +446,7 @@ def cmd_jira_search(
     output: OutputFormat,
     limit: int | None,
 ) -> None:
-    base_url = client.creds.base_url
+    base_url = client.jira.creds.web_base
     if web:
         open_url(search_issues_url(base_url, jql))
         return
@@ -355,7 +465,9 @@ def cmd_confluence_view(
     client: AtlassianClient, page_id: str, *, web: bool, output: OutputFormat
 ) -> None:
     if web:
-        open_url(f"{client.creds.base_url}/wiki/pages/viewpage.action?pageId={page_id}")
+        open_url(
+            f"{client.confluence.creds.web_base}/wiki/pages/viewpage.action?pageId={page_id}"
+        )
         return
 
     match output:
@@ -375,7 +487,7 @@ def cmd_confluence_search(
     output: OutputFormat,
     limit: int | None,
 ) -> None:
-    base_url = client.creds.base_url
+    base_url = client.confluence.creds.web_base
     if web:
         open_url(search_pages_url(base_url, cql))
         return

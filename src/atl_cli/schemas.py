@@ -290,6 +290,22 @@ class ConfluenceSearchPage(ApiModel):
 
 
 # --------------------------------------------------------------------------- #
+# Auth / tenant discovery (cloudId resolution for scoped-token gateway URLs)
+# --------------------------------------------------------------------------- #
+class TenantInfo(ApiModel):
+    """The site's unauthenticated ``_edge/tenant_info`` response."""
+
+    cloud_id: str | None = Field(default=None, alias="cloudId")
+
+
+class AccessibleResource(ApiModel):
+    """One entry of ``accessible-resources``: a site's cloudId (``id``) and URL."""
+
+    id: str | None = None
+    url: str | None = None
+
+
+# --------------------------------------------------------------------------- #
 # Error responses
 # --------------------------------------------------------------------------- #
 class ApiError(ApiModel):

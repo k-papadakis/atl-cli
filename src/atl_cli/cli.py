@@ -8,7 +8,12 @@ import typer
 from rich.console import Console
 
 from atl_cli import __version__
-from atl_cli.account import load_credentials, remove_credentials
+from atl_cli.account import (
+    available_products,
+    load_credentials,
+    remove_all_credentials,
+    remove_credentials,
+)
 from atl_cli.client import AtlassianClient
 from atl_cli.commands import (
     OutputFormat,
@@ -21,8 +26,10 @@ from atl_cli.commands import (
     cmd_jira_view,
     cmd_login,
     cmd_status,
+    cmd_status_all,
 )
 from atl_cli.errors import AtlError
+from atl_cli.models import Product
 
 # Rich stderr console, as Typer recommends for output/errors; it honors
 # NO_COLOR, FORCE_COLOR and tty detection automatically.
@@ -38,6 +45,10 @@ app = typer.Typer(
 )
 jira_app = typer.Typer(help="Jira work items", no_args_is_help=True)
 conf_app = typer.Typer(help="Confluence pages", no_args_is_help=True)
+# Credential management is a cross-cutting concern, so it lives in one `auth`
+# group with the product as an argument rather than nested under each content
+# group. A scoped API token is locked to a single product, so `login` names one;
+# `logout`/`status` default to every configured product.
 auth_app = typer.Typer(help="Manage credentials", no_args_is_help=True)
 app.add_typer(jira_app, name="jira")
 app.add_typer(conf_app, name="confluence")
@@ -70,8 +81,8 @@ def root(
 
 
 def _connect() -> AtlassianClient:
-    """Load stored credentials and return a ready client."""
-    return AtlassianClient(load_credentials())
+    """Return a client that loads each product's credential on demand."""
+    return AtlassianClient(load_credentials, available_products)
 
 
 # Shared option annotations.
@@ -118,6 +129,13 @@ Header = Annotated[
     list[str] | None,
     typer.Option("-H", "--header", help="add a request header (key:value)"),
 ]
+ProductOpt = Annotated[
+    Product | None,
+    typer.Option(
+        "--product",
+        help="force the product (jira/confluence) instead of inferring it from the path",
+    ),
+]
 
 
 @app.command("api")
@@ -130,6 +148,7 @@ def api(
     field: TypedField = None,
     input: InputSource = None,
     header: Header = None,
+    product: ProductOpt = None,
 ) -> None:
     """Make an authenticated request to the Atlassian REST API (Jira or Confluence)."""
     cmd_api(
@@ -140,6 +159,7 @@ def api(
         typed_fields=field or [],
         input_source=input,
         headers=header or [],
+        product=product,
     )
 
 
@@ -210,22 +230,35 @@ def confluence_download_attachment(
     cmd_confluence_attachment(_connect(), attachment_id, output=output)
 
 
+AuthProduct = Annotated[Product, typer.Argument(help="jira or confluence")]
+OptAuthProduct = Annotated[
+    Product | None,
+    typer.Argument(help="jira or confluence (default: all configured products)"),
+]
+
+
 @auth_app.command("login")
-def auth_login() -> None:
-    """Save or update Atlassian credentials."""
-    cmd_login()
+def auth_login(product: AuthProduct) -> None:
+    """Save or update a product's credentials."""
+    cmd_login(product)
 
 
 @auth_app.command("logout")
-def auth_logout() -> None:
-    """Remove stored credentials."""
-    remove_credentials()
+def auth_logout(product: OptAuthProduct = None) -> None:
+    """Remove a product's credentials, or all of them."""
+    if product is None:
+        remove_all_credentials()
+    else:
+        remove_credentials(product)
 
 
 @auth_app.command("status")
-def auth_status() -> None:
-    """Show the configured site and account."""
-    cmd_status()
+def auth_status(product: OptAuthProduct = None) -> None:
+    """Show a product's account, or every configured product."""
+    if product is None:
+        cmd_status_all()
+    else:
+        cmd_status(product)
 
 
 def main() -> None:

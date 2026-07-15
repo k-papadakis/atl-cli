@@ -1,14 +1,16 @@
 """Credential persistence: metadata in a config file, the token in the keyring.
 
-Non-secret metadata (site URL, username) lives in a mode-600 JSON file. The API
-token is kept in the OS keyring; if no keyring backend is usable it falls back
-to the same file.
+Credentials are stored *per product* (Jira, Confluence): a scoped API token is
+locked to a single product, so each product gets its own entry with its own
+resolved base URL and mode. Non-secret metadata lives in a mode-600 JSON file;
+the token is kept in the OS keyring (keyed per product), falling back to the
+same file when no keyring backend is usable.
 
-The storage *policy* -- which backend to use, what the file should contain,
-whether a failed write must roll the keyring back, and how to resolve a token on
-load -- lives in the pure functions below (`plan_storage`, `resolve_token`,
-`stored_backend`), tested with plain data. The remaining functions are the thin
-I/O shell that runs the plan.
+The storage *policy* -- the keyring key scheme, which backend to use, how to
+merge a new credential into the existing document, whether a failed write must
+roll the keyring back, and how to resolve a token on load -- lives in the pure
+functions below. The remaining functions are the thin I/O shell that runs the
+plan.
 """
 
 import json
@@ -17,21 +19,52 @@ from dataclasses import dataclass
 
 import keyring
 import keyring.errors
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from atl_cli.config import CONFIG_DIR, CRED_FILE, KEYRING_SERVICE, PROG
 from atl_cli.errors import AtlError
-from atl_cli.models import Credentials, StoredMetadata, TokenBackend
+from atl_cli.models import (
+    AuthMode,
+    Credentials,
+    Product,
+    StoredCredential,
+    StoredMetadata,
+    TokenBackend,
+)
 
 
 # --------------------------------------------------------------------------- #
 # Pure storage policy
 # --------------------------------------------------------------------------- #
+def keyring_service(product: Product) -> str:
+    """The keyring service (the Keychain item name) for a product's token.
+
+    The product is namespaced into the *service*, keyed by the plain username,
+    so each product is a distinct entry -- rather than overloading the username
+    field with a ``product:username`` compound key. This keeps the stored
+    account equal to the real login identity, and two products for one user
+    still can't collide because they live under different services.
+    """
+    return f"{KEYRING_SERVICE}-{product.value}"
+
+
+def serialize_metadata(
+    credentials: dict[Product, StoredCredential],
+) -> dict[str, JsonValue]:
+    """Render a per-product credential map as the on-disk document."""
+    return {
+        "credentials": {
+            product.value: cred.model_dump(mode="json", exclude_none=True)
+            for product, cred in credentials.items()
+        },
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class StoragePlan:
     """What to persist for a credential, and how to recover from a failed write."""
 
-    metadata: dict[str, str]
+    document: dict[str, JsonValue]  # the credentials document to serialize to the file
     backend: TokenBackend
     # The token was placed in the keyring, so a failed metadata write must delete
     # it again -- otherwise the secret is orphaned with no file to locate it by.
@@ -39,38 +72,92 @@ class StoragePlan:
 
 
 def plan_storage(
-    base_url: str, username: str, token: str, *, keyring_ok: bool
+    existing: StoredMetadata,
+    product: Product,
+    *,
+    base_url: str,
+    site_url: str,
+    username: str,
+    token: str,
+    mode: AuthMode,
+    cloud_id: str | None,
+    keyring_ok: bool,
 ) -> StoragePlan:
-    """Decide where the token lives and what the metadata file should contain.
+    """Merge a new/updated per-product credential into the existing document.
 
     With a working keyring the token stays out of the file (keyring backend);
-    otherwise it falls back into the mode-600 file.
+    otherwise it falls into the mode-600 file. Any credential for the *other*
+    product is preserved.
     """
-    metadata = {"url": base_url, "username": username}
-    if keyring_ok:
-        return StoragePlan(metadata, TokenBackend.KEYRING, rollback_keyring=True)
-    return StoragePlan(
-        metadata | {"token": token}, TokenBackend.FILE, rollback_keyring=False
+    cred = StoredCredential(
+        url=base_url,
+        site_url=site_url,
+        username=username,
+        token=None if keyring_ok else token,
+        mode=mode,
+        cloud_id=cloud_id,
     )
+    credentials = dict(existing.credentials)
+    credentials[product] = cred
+    document = serialize_metadata(credentials)
+    if keyring_ok:
+        return StoragePlan(document, TokenBackend.KEYRING, rollback_keyring=True)
+    return StoragePlan(document, TokenBackend.FILE, rollback_keyring=False)
 
 
-def resolve_token(meta: StoredMetadata, keyring_token: str | None) -> str:
+def resolve_token(
+    product: Product, cred: StoredCredential, keyring_token: str | None
+) -> str:
     """Pick the effective token: a file token wins, else the keyring's."""
-    token = meta.token or keyring_token or ""
+    token = cred.token or keyring_token or ""
     if not token:
-        raise AtlError(f"Token not found. Run '{PROG} auth login'.")
+        raise AtlError(f"Token not found. Run '{PROG} auth login {product.value}'.")
     return token
 
 
-def stored_backend(meta: StoredMetadata) -> TokenBackend:
-    return TokenBackend.FILE if meta.token else TokenBackend.KEYRING
+def stored_backend(cred: StoredCredential) -> TokenBackend:
+    return TokenBackend.FILE if cred.token else TokenBackend.KEYRING
 
 
 # --------------------------------------------------------------------------- #
 # I/O shell
 # --------------------------------------------------------------------------- #
-def save_credentials(base_url: str, username: str, token: str) -> TokenBackend:
-    """Persist metadata to the config file and the token to the keyring.
+def _read_metadata_or_empty() -> StoredMetadata:
+    """Read the existing document for merging, tolerating an absent/malformed
+    file (a login is a deliberate reset)."""
+    try:
+        return read_metadata()
+    except AtlError:
+        return StoredMetadata()
+
+
+def _delete_keyring(product: Product, username: str) -> None:
+    """Best-effort keyring deletion: a missing entry is fine; a real backend
+    error is surfaced but not fatal."""
+    try:
+        keyring.delete_password(keyring_service(product), username)
+    except keyring.errors.PasswordDeleteError:
+        pass  # nothing was stored; nothing to remove
+    except keyring.errors.KeyringError as exc:
+        print(
+            "Warning: could not remove the token from the keyring; "
+            + f"it may still be present: {exc}",
+            file=sys.stderr,
+        )
+
+
+def save_credentials(
+    product: Product,
+    *,
+    base_url: str,
+    site_url: str,
+    username: str,
+    token: str,
+    mode: AuthMode,
+    cloud_id: str | None,
+) -> TokenBackend:
+    """Persist a product's metadata to the config file and its token to the
+    keyring, preserving any credential already stored for the other product.
 
     Falls back to a mode-600 file if no keyring backend is usable.
     """
@@ -79,9 +166,11 @@ def save_credentials(base_url: str, username: str, token: str) -> TokenBackend:
     except OSError as exc:
         raise AtlError(f"Could not create {CONFIG_DIR}: {exc.strerror}") from exc
 
+    existing = _read_metadata_or_empty()
+
     keyring_ok = True
     try:
-        keyring.set_password(KEYRING_SERVICE, username, token)
+        keyring.set_password(keyring_service(product), username, token)
     except keyring.errors.KeyringError as exc:
         print(
             f"Warning: keyring unavailable ({exc}); "
@@ -90,29 +179,30 @@ def save_credentials(base_url: str, username: str, token: str) -> TokenBackend:
         )
         keyring_ok = False
 
-    plan = plan_storage(base_url, username, token, keyring_ok=keyring_ok)
+    plan = plan_storage(
+        existing,
+        product,
+        base_url=base_url,
+        site_url=site_url,
+        username=username,
+        token=token,
+        mode=mode,
+        cloud_id=cloud_id,
+        keyring_ok=keyring_ok,
+    )
     try:
-        _ = CRED_FILE.write_text(json.dumps(plan.metadata))
+        _ = CRED_FILE.write_text(json.dumps(plan.document))
         CRED_FILE.chmod(0o600)
     except OSError as exc:
         if plan.rollback_keyring:
-            try:
-                keyring.delete_password(KEYRING_SERVICE, username)
-            except keyring.errors.KeyringError as rollback_exc:
-                # The metadata write failed *and* we can't undo the keyring set,
-                # so the token may be orphaned -- say so rather than hide it.
-                print(
-                    "Warning: could not roll back the keyring token; "
-                    + f"it may remain stored: {rollback_exc}",
-                    file=sys.stderr,
-                )
+            _delete_keyring(product, username)
         raise AtlError(f"Could not write to {CRED_FILE}: {exc.strerror}") from exc
     return plan.backend
 
 
 def read_metadata() -> StoredMetadata:
     if not CRED_FILE.exists():
-        raise AtlError(f"No credentials found. Run '{PROG} auth login' to set up.")
+        raise AtlError(f"No credentials found. Run '{PROG} auth login jira' to set up.")
     try:
         raw = CRED_FILE.read_text()
     except OSError as exc:
@@ -121,37 +211,87 @@ def read_metadata() -> StoredMetadata:
         return StoredMetadata.model_validate_json(raw)
     except ValidationError as exc:
         raise AtlError(
-            f"Credentials file is malformed. Run '{PROG} auth login' to reset."
+            f"Credentials file is malformed. Run '{PROG} auth login jira' to reset."
         ) from exc
 
 
-def load_credentials() -> Credentials:
+def _keyring_token(product: Product, username: str) -> str | None:
+    """Fetch a product's token from the keyring."""
+    try:
+        return keyring.get_password(keyring_service(product), username)
+    except keyring.errors.KeyringError as exc:
+        raise AtlError(f"Could not read the token from the keyring: {exc}") from exc
+
+
+def available_products() -> list[Product]:
+    """Which products currently have a stored credential (empty if none)."""
+    try:
+        meta = read_metadata()
+    except AtlError:
+        return []
+    return [product for product in Product if product in meta.credentials]
+
+
+def load_credentials(product: Product) -> Credentials:
     meta = read_metadata()
-    keyring_token: str | None = None
-    if not meta.token:
+    cred = meta.credentials.get(product)
+    if cred is None:
+        raise AtlError(
+            f"No {product.value} credentials. Run '{PROG} auth login {product.value}'."
+        )
+    keyring_token = None if cred.token else _keyring_token(product, cred.username)
+    return Credentials(
+        base_url=cred.url,
+        username=cred.username,
+        token=resolve_token(product, cred, keyring_token),
+        product=product,
+        mode=cred.mode,
+        site_url=cred.site_url or cred.url,
+        cloud_id=cred.cloud_id,
+    )
+
+
+def _write_or_unlink(credentials: dict[Product, StoredCredential]) -> None:
+    """Rewrite the file with the given credentials, or unlink it when empty."""
+    if not credentials:
         try:
-            keyring_token = keyring.get_password(KEYRING_SERVICE, meta.username)
-        except keyring.errors.KeyringError as exc:
-            raise AtlError(f"Could not read the token from the keyring: {exc}") from exc
-    return Credentials(meta.url, meta.username, resolve_token(meta, keyring_token))
+            CRED_FILE.unlink()
+        except OSError as exc:
+            raise AtlError(f"Could not remove {CRED_FILE}: {exc.strerror}") from exc
+        return
+    try:
+        _ = CRED_FILE.write_text(json.dumps(serialize_metadata(credentials)))
+        CRED_FILE.chmod(0o600)
+    except OSError as exc:
+        raise AtlError(f"Could not write to {CRED_FILE}: {exc.strerror}") from exc
 
 
-def remove_credentials() -> None:
+def remove_credentials(product: Product) -> None:
+    """Remove one product's credential, leaving the other intact."""
     if not CRED_FILE.exists():
         print("No credentials found.", file=sys.stderr)
         return
     meta = read_metadata()
-    if stored_backend(meta) is TokenBackend.KEYRING:
-        try:
-            keyring.delete_password(KEYRING_SERVICE, meta.username)
-        except keyring.errors.PasswordDeleteError:
-            pass  # nothing was stored; nothing to remove
-        except keyring.errors.KeyringError as exc:
-            print(
-                "Warning: could not remove the token from the keyring; "
-                + f"it may still be present: {exc}",
-                file=sys.stderr,
-            )
+    cred = meta.credentials.get(product)
+    if cred is None:
+        print(f"No {product.value} credentials found.", file=sys.stderr)
+        return
+    if stored_backend(cred) is TokenBackend.KEYRING:
+        _delete_keyring(product, cred.username)
+    remaining = {p: c for p, c in meta.credentials.items() if p != product}
+    _write_or_unlink(remaining)
+    print(f"{product.value.capitalize()} credentials removed.", file=sys.stderr)
+
+
+def remove_all_credentials() -> None:
+    """Remove every stored credential and delete the file."""
+    if not CRED_FILE.exists():
+        print("No credentials found.", file=sys.stderr)
+        return
+    meta = read_metadata()
+    for product, cred in meta.credentials.items():
+        if stored_backend(cred) is TokenBackend.KEYRING:
+            _delete_keyring(product, cred.username)
     try:
         CRED_FILE.unlink()
     except OSError as exc:
