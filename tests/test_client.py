@@ -2,10 +2,13 @@
 parsing, endpoint validation, and web-search URL builders.
 """
 
+from collections.abc import Callable
+
 import httpx
 import pytest
 
 from atl_cli.client import (
+    AtlassianClient,
     build_gateway_base,
     choose_api_product,
     cursor_from,
@@ -180,3 +183,80 @@ def test_build_gateway_base_names_the_product_and_cloud_id() -> None:
         build_gateway_base(Product.CONFLUENCE, "cid")
         == "https://api.atlassian.com/ex/confluence/cid"
     )
+
+
+# --------------------------------------------------------------------------- #
+# AtlassianClient facade: lazy per-product loading and `atl api` routing.
+# These exercise the injection seam directly -- the client is built from fake
+# loader/available callables, so no keyring, filesystem, or network is touched.
+# --------------------------------------------------------------------------- #
+def _fake_source(
+    configured: list[Product], loaded: list[Product]
+) -> tuple[Callable[[Product], Credentials], Callable[[], list[Product]]]:
+    """A (loader, available) pair over a fixed product set, recording each load."""
+
+    def loader(product: Product) -> Credentials:
+        loaded.append(product)
+        if product not in configured:
+            raise AtlError(f"No {product.value} credentials.")
+        return _creds(product=product)
+
+    return loader, lambda: list(configured)
+
+
+def test_client_loads_only_the_touched_product_and_caches_it() -> None:
+    """Touching one surface never loads the other, and a repeat access is cached."""
+    loaded: list[Product] = []
+    loader, available = _fake_source([Product.JIRA, Product.CONFLUENCE], loaded)
+    client = AtlassianClient(loader, available)
+
+    _ = client.jira
+    _ = client.jira  # cached_property: the second access must not reload
+
+    assert loaded == [Product.JIRA]  # Confluence is configured but never loaded
+
+
+def test_api_routes_to_the_product_inferred_from_the_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With both configured, `api` sends each path to that product's credential."""
+    seen: list[Product] = []
+
+    def fake_request(
+        creds: Credentials, *_args: object, **_kwargs: object
+    ) -> httpx.Response:
+        seen.append(creds.product)
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr("atl_cli.client._request", fake_request)
+    loader, available = _fake_source([Product.JIRA, Product.CONFLUENCE], [])
+    client = AtlassianClient(loader, available)
+
+    _ = client.api("GET", "/wiki/rest/api/content/1")
+    _ = client.api("GET", "/rest/api/3/myself")
+
+    assert seen == [Product.CONFLUENCE, Product.JIRA]
+
+
+def test_api_uses_the_sole_credential_regardless_of_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With one product configured, a Confluence-looking path still uses it and
+    never loads the unconfigured product."""
+    seen: list[Product] = []
+
+    def fake_request(
+        creds: Credentials, *_args: object, **_kwargs: object
+    ) -> httpx.Response:
+        seen.append(creds.product)
+        return httpx.Response(200, json={})
+
+    monkeypatch.setattr("atl_cli.client._request", fake_request)
+    loaded: list[Product] = []
+    loader, available = _fake_source([Product.JIRA], loaded)
+    client = AtlassianClient(loader, available)
+
+    _ = client.api("GET", "/wiki/rest/api/content/1")
+
+    assert seen == [Product.JIRA]
+    assert loaded == [Product.JIRA]  # the Confluence loader is never invoked
