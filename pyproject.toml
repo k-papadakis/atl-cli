@@ -3,7 +3,7 @@
 # `atl_cli`. [project.scripts] below installs both `atl` (short, everyday
 # command) and `atl-cli` (so `uvx atl-cli` resolves without `--from`).
 name = "atl-cli"
-version = "0.5.0"
+version = "0.5.1"
 description = "Render Atlassian (Jira + Confluence) content as clean Markdown in the terminal."
 readme = "README.md"
 license = "MIT"
