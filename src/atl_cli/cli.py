@@ -255,10 +255,12 @@ def auth_logout(product: OptAuthProduct = None) -> None:
 @auth_app.command("status")
 def auth_status(product: OptAuthProduct = None) -> None:
     """Show a product's account, or every configured product."""
-    if product is None:
-        cmd_status_all()
-    else:
-        cmd_status(product)
+    ok = cmd_status_all() if product is None else cmd_status(product)
+    if not ok:
+        # A token that can't be verified is reported on stdout above; exit non-zero
+        # so scripts can detect it. typer.Exit (not AtlError) keeps main() from
+        # adding a contradictory 'Error:' line to stderr.
+        raise typer.Exit(1)
 
 
 def main() -> None:

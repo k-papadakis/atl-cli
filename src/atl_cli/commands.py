@@ -378,7 +378,14 @@ def _verify_for_status(product: Product, cred: StoredCredential) -> str:
     return me.display_name or cred.username
 
 
-def cmd_status(product: Product) -> None:
+def cmd_status(product: Product) -> bool:
+    """Report a product's account and whether its token still verifies.
+
+    Returns True only if the token was retrieved and accepted. Verification is a
+    reported outcome, not a fatal error -- the account line and the verdict are
+    printed in order, so a keyring/network/token failure can't contradict an
+    already-emitted success line.
+    """
     meta = read_metadata()
     cred = meta.credentials.get(product)
     if cred is None:
@@ -386,27 +393,39 @@ def cmd_status(product: Product) -> None:
             f"Not logged in to {product.value}. "
             + f"Run 'atl auth login {product.value}'."
         )
-        return
+        return True
     print(
         f"Logged in to {cred.site_url or cred.url} as {cred.username} "
         + f"(product: {product.value}, mode: {cred.mode.value}, "
         + f"token backend: {stored_backend(cred).value})"
     )
-    display = _verify_for_status(product, cred)
+    try:
+        display = _verify_for_status(product, cred)
+    except AtlError as exc:
+        print(f"Token could not be verified: {exc}")
+        return False
     print(f"Token verified — authenticated as {display}.")
+    return True
 
 
-def cmd_status_all() -> None:
-    """Show every configured product (for the top-level ``atl auth status``)."""
+def cmd_status_all() -> bool:
+    """Show every configured product (for the top-level ``atl auth status``).
+
+    Every configured product is always shown; the return is False if any of them
+    failed to verify.
+    """
     products = available_products()
     if not products:
         print(
             "Not logged in. Run 'atl auth login jira' or "
             + "'atl auth login confluence'."
         )
-        return
-    for product in products:
-        cmd_status(product)
+        return True
+    # Materialize before aggregating: every product must be shown, so all of the
+    # (printing) cmd_status calls have to run. A generator would let all() short-
+    # circuit on the first failure and skip the rest of the output.
+    results = [cmd_status(product) for product in products]
+    return all(results)
 
 
 def cmd_jira_view(
