@@ -155,22 +155,20 @@ def choose_api_product(
 
 
 def resolve_endpoint(creds: Credentials, endpoint: str) -> str:
-    """Resolve a raw-passthrough endpoint against the product's REST root.
+    """Resolve a raw-passthrough endpoint against the credential's REST root.
 
-    An absolute URL must match either the configured site's origin or the
-    scoped-token gateway origin the credential uses, so the stored token is never
-    sent elsewhere. Anything else is joined to the credential's ``base_url`` (a
-    leading slash is optional) -- the site root in classic mode, the gateway root
-    in scoped mode -- so the caller types the real REST path, version included.
+    An absolute URL must match the credential's own REST origin -- the site in
+    classic mode, the api.atlassian.com gateway in scoped mode (``base_url`` is
+    that origin either way) -- so the token is never sent anywhere else. A scoped
+    token in particular is never replayed against the site it can't use. Any
+    other value is joined to ``base_url`` (a leading slash is optional), so the
+    caller types the real REST path, version included.
     """
     if endpoint.startswith(("http://", "https://")):
-        allowed = {_origin(creds.base_url)}
-        if creds.site_url:
-            allowed.add(_origin(creds.site_url))
-        if _origin(endpoint) not in allowed:
+        if _origin(endpoint) != _origin(creds.base_url):
             raise AtlError(
-                "API endpoint must use the configured site's origin "
-                + "(or, for a scoped token, its api.atlassian.com gateway)."
+                "API endpoint must use the credential's own origin (the "
+                + "configured site, or the gateway for a scoped token)."
             )
         return endpoint
     return f"{creds.base_url}/{endpoint.removeprefix('/')}"

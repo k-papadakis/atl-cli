@@ -115,15 +115,13 @@ def test_resolve_endpoint_passes_same_origin_full_urls_through() -> None:
     assert resolve_endpoint(_creds(), url) == url
 
 
-def test_resolve_endpoint_accepts_the_gateway_origin_in_scoped_mode() -> None:
-    """Both the gateway origin and the human site origin are allowed for a scoped token."""
+def test_resolve_endpoint_accepts_only_the_gateway_origin_in_scoped_mode() -> None:
+    """A scoped token reaches its gateway origin only -- never the site it can't use."""
     creds = _creds("https://api.atlassian.com/ex/jira/cid", mode=AuthMode.GATEWAY)
     gateway_url = "https://api.atlassian.com/ex/jira/cid/rest/api/3/field"
     assert resolve_endpoint(creds, gateway_url) == gateway_url
-    assert (
-        resolve_endpoint(creds, "https://site/rest/api/3/field")
-        == "https://site/rest/api/3/field"
-    )
+    with pytest.raises(AtlError, match="credential's own origin"):
+        _ = resolve_endpoint(creds, "https://site/rest/api/3/field")
 
 
 @pytest.mark.parametrize(
@@ -136,7 +134,7 @@ def test_resolve_endpoint_accepts_the_gateway_origin_in_scoped_mode() -> None:
 )
 def test_resolve_endpoint_rejects_cross_origin_urls(endpoint: str) -> None:
     """Configured credentials must never be sent to a different origin."""
-    with pytest.raises(AtlError, match="configured site's origin"):
+    with pytest.raises(AtlError, match="credential's own origin"):
         _ = resolve_endpoint(_creds(), endpoint)
 
 
