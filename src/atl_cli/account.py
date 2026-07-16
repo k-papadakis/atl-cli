@@ -13,9 +13,13 @@ functions below. The remaining functions are the thin I/O shell that runs the
 plan.
 """
 
+import contextlib
 import json
+import os
 import sys
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 import keyring
 import keyring.errors
@@ -122,6 +126,25 @@ def stored_backend(cred: StoredCredential) -> TokenBackend:
 # --------------------------------------------------------------------------- #
 # I/O shell
 # --------------------------------------------------------------------------- #
+def _write_secure(path: Path, data: str) -> None:
+    """Atomically write text to a mode-600 file.
+
+    The data is written to a temp file in the same directory -- created 0o600 by
+    ``mkstemp``, so it is never briefly group/world-readable the way a plain
+    ``write_text`` would be -- then renamed into place. The rename is atomic, so
+    a crashed write can't leave a truncated credentials file behind.
+    """
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            _ = f.write(data)
+        os.replace(tmp, path)
+    except OSError:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def _read_metadata_or_empty() -> StoredMetadata:
     """Read the existing document for merging, tolerating an absent/malformed
     file (a login is a deliberate reset)."""
@@ -191,8 +214,7 @@ def save_credentials(
         keyring_ok=keyring_ok,
     )
     try:
-        _ = CRED_FILE.write_text(json.dumps(plan.document))
-        CRED_FILE.chmod(0o600)
+        _write_secure(CRED_FILE, json.dumps(plan.document))
     except OSError as exc:
         if plan.rollback_keyring:
             _delete_keyring(product, username)
@@ -260,8 +282,7 @@ def _write_or_unlink(credentials: dict[Product, StoredCredential]) -> None:
             raise AtlError(f"Could not remove {CRED_FILE}: {exc.strerror}") from exc
         return
     try:
-        _ = CRED_FILE.write_text(json.dumps(serialize_metadata(credentials)))
-        CRED_FILE.chmod(0o600)
+        _write_secure(CRED_FILE, json.dumps(serialize_metadata(credentials)))
     except OSError as exc:
         raise AtlError(f"Could not write to {CRED_FILE}: {exc.strerror}") from exc
 
