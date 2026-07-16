@@ -1,19 +1,16 @@
 # atl
 
 `atl` fetches Atlassian (Jira + Confluence) content from the terminal and
-renders the HTML the REST APIs return as clean Markdown. It's built for AI
+renders the HTML returned by the REST APIs as clean Markdown. It's built for AI
 agents: `view` folds a work item or page and its context — comments, links,
 sub-tasks, children, attachments — into a single Markdown document, and every
 command has an `--output json` mode for scripting.
 
 For anything the curated commands don't cover, `atl api` is a raw, authenticated
-passthrough to the Atlassian REST API, modeled on `gh api`: type the real Jira
-(`/rest/...`) or Confluence (`/wiki/...`) path against your configured host and
-token — reads or writes (subject to your token's scopes). With one credential
-configured it is used for any path; with both Jira and Confluence configured the
-product is inferred from the path (override with `--product`). Absolute endpoints
-are allowed only for your configured site — or, for a scoped token, its API
-gateway — so the stored credentials cannot be sent to another origin.
+passthrough to the Atlassian REST API, modeled on `gh api`: hit a real Jira
+(`/rest/...`) or Confluence (`/wiki/...`) path for reads or writes, subject to your
+token's scopes. The product is inferred from the path (override with `--product`),
+and requests only ever reach your configured host.
 
 ## Install
 
@@ -32,30 +29,29 @@ then verifies it before saving.
 
 Two token kinds work, detected automatically at login:
 
-- A **classic** ("full access") token talks to your site directly and covers
-  both products.
-- A **scoped** token ("Create API token with scopes") is locked to a single
-  product and reaches the API through Atlassian's gateway. Log in a read-only
-  scoped token per product to enforce read-only access — writes are then rejected
-  by Atlassian itself, not by the tool.
+- A **classic** ("full access") token talks to your site directly and covers both
+  products.
+- A **scoped** token ("Create API token with scopes") is locked to one product and
+  reaches the API through Atlassian's gateway. Logging in a read-only scoped token
+  enforces read-only access — writes are rejected by Atlassian itself, not the tool.
 
-To mint a read-only scoped token, use "Create API token with scopes", set a name
-and expiry, pick the product, then choose **Scope Type: Classic** and select these
-**Scope Actions** (or select all of the listed read scopes):
+To mint a read-only scoped token: "Create API token with scopes", set a name and
+expiry, pick the product, choose **Scope Type: Classic**, and select these **Scope
+Actions**:
 
 - **Jira** — `Read`.
-- **Confluence** — `Read`, `Read Only`, **and `Search`** (the `search:confluence`
-  scope is required for `atl confluence search`; without it search returns
-  "scope does not match" while `view` still works).
+- **Confluence** — `Read`, `Read Only`, **and `Search`** (`search:confluence` is
+  required for `atl confluence search`; without it search returns "scope does not
+  match" while `view` still works).
 
-- Non-secret metadata (site URL and username) is written to
-  `~/.config/atl-cli/credentials.json` (mode 600; honors `XDG_CONFIG_HOME`).
-- The API token is stored in your OS keyring (keyed per product); if no keyring
-  backend is available it falls back into that same mode-600 file.
+Where credentials live: non-secret metadata (site URL and username) goes to
+`~/.config/atl-cli/credentials.json` (mode 600; honors `XDG_CONFIG_HOME`); the API
+token goes to your OS keyring (per product), falling back to that same file if no
+keyring backend is available.
 
-`atl auth status <product>` shows a product's account and re-verifies its token;
-`atl auth status` (no product) shows every configured product. `atl auth logout
-<product>` removes one product; `atl auth logout` (no product) removes everything.
+`atl auth status [product]` shows an account and re-verifies its token; `atl auth
+logout [product]` removes a product's credentials. Omit the product for all
+configured products.
 
 ## Usage
 

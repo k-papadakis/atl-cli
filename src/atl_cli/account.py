@@ -1,16 +1,13 @@
 """Credential persistence: metadata in a config file, the token in the keyring.
 
 Credentials are stored *per product* (Jira, Confluence): a scoped API token is
-locked to a single product, so each product gets its own entry with its own
-resolved base URL and mode. Non-secret metadata lives in a mode-600 JSON file;
-the token is kept in the OS keyring (keyed per product), falling back to the
-same file when no keyring backend is usable.
+locked to a single product, so each gets its own entry with its own base URL and
+mode. Non-secret metadata lives in a mode-600 JSON file; the token is kept in the
+OS keyring (keyed per product), falling back to that file when no keyring backend
+is usable.
 
-The storage *policy* -- the keyring key scheme, which backend to use, how to
-merge a new credential into the existing document, whether a failed write must
-roll the keyring back, and how to resolve a token on load -- lives in the pure
-functions below. The remaining functions are the thin I/O shell that runs the
-plan.
+The storage *policy* (key scheme, backend choice, merge, rollback, token
+resolution) lives in the pure functions below; the rest is the thin I/O shell.
 """
 
 import contextlib
@@ -41,13 +38,11 @@ from atl_cli.models import (
 # Pure storage policy
 # --------------------------------------------------------------------------- #
 def keyring_service(product: Product) -> str:
-    """The keyring service (the Keychain item name) for a product's token.
+    """The keyring service (Keychain item name) for a product's token.
 
-    The product is namespaced into the *service*, keyed by the plain username,
-    so each product is a distinct entry -- rather than overloading the username
-    field with a ``product:username`` compound key. This keeps the stored
-    account equal to the real login identity, and two products for one user
-    still can't collide because they live under different services.
+    The product is namespaced into the *service*, keyed by the plain username, so
+    each product is its own entry and the stored account stays equal to the real
+    login identity -- rather than overloading the username with a compound key.
     """
     return f"{KEYRING_SERVICE}-{product.value}"
 
@@ -156,11 +151,18 @@ def _read_metadata_or_empty() -> StoredMetadata:
 
 def _delete_keyring(product: Product, username: str) -> None:
     """Best-effort keyring deletion: a missing entry is fine; a real backend
-    error is surfaced but not fatal."""
+    error is surfaced but not fatal.
+
+    Note: some backends (macOS among them) wrap *every* delete failure as a
+    ``PasswordDeleteError``, so the branch below can't tell a missing entry from
+    a genuine failure and swallows both -- which also means the ``KeyringError``
+    warning branch never fires for a failed delete. That's acceptable here:
+    logout is best-effort and the file-side removal proceeds regardless.
+    """
     try:
         keyring.delete_password(keyring_service(product), username)
     except keyring.errors.PasswordDeleteError:
-        pass  # nothing was stored; nothing to remove
+        pass  # no such entry, or a best-effort delete that failed -- either way, move on
     except keyring.errors.KeyringError as exc:
         print(
             "Warning: could not remove the token from the keyring; "

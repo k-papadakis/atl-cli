@@ -16,12 +16,7 @@ class TokenBackend(StrEnum):
 
 
 class Product(StrEnum):
-    """An Atlassian product a credential is scoped to.
-
-    A scoped API token is locked to a single product, so credentials are stored
-    per product, each logged in on its own. A classic (full-access) token works
-    for both products, but is still logged in once per product.
-    """
+    """An Atlassian product a credential is scoped to."""
 
     JIRA = "jira"
     CONFLUENCE = "confluence"
@@ -74,20 +69,16 @@ class Credentials:
     def web_base(self) -> str:
         """The human site root for browser links.
 
-        In gateway mode ``base_url`` is the API gateway, which is not browsable,
-        so ``--web`` links must use the original site; falls back to ``base_url``
-        (identical in site mode, and for credentials built without a site_url).
+        In gateway mode ``base_url`` is the API gateway (not browsable), so
+        ``--web`` links use the original site; falls back to ``base_url`` (which is
+        identical in site mode).
         """
         return self.site_url or self.base_url
 
 
 @dataclass(frozen=True, slots=True)
 class Page[T]:
-    """A slice of search results plus whether the server had more beyond it.
-
-    The aggregated, domain-facing outcome of a paginated search: `more` is a
-    plain fact carried as data, not re-derived from a wire cursor downstream.
-    """
+    """A slice of search results, plus whether the server had more beyond it."""
 
     items: list[T]
     more: bool

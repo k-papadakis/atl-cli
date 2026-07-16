@@ -69,7 +69,7 @@ def root(
         typer.Option(
             "--version",
             "-V",
-            help="Show the version and exit.",
+            help="show the version and exit",
             callback=_version_callback,
             is_eager=True,
         ),
@@ -133,7 +133,7 @@ ProductOpt = Annotated[
     Product | None,
     typer.Option(
         "--product",
-        help="force the product (jira/confluence) instead of inferring it from the path",
+        help="force the product instead of inferring it from the path",
     ),
 ]
 

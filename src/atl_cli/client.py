@@ -502,9 +502,9 @@ class JiraApi:
 
 @dataclass
 class ConfluenceApi:
-    """Confluence read API, on the v1 REST API throughout: it is the only
-    version offering content search, so staying on it keeps every response
-    (page, comments, search) a single uniform ``content`` shape.
+    """Confluence read API, on the v1 REST API throughout: it is the only version
+    offering content search, so every response (page, comments, search) keeps a
+    uniform ``content`` shape.
     """
 
     creds: Credentials
@@ -618,10 +618,9 @@ class ConfluenceApi:
 class AtlassianClient:
     """Facade over the two product surfaces.
 
-    Credentials are loaded per product, lazily and on demand: running a Jira
-    command never requires Confluence to be configured, and vice versa. A
-    missing product credential surfaces a clear per-product error only when that
-    product is actually used.
+    Credentials are loaded per product, lazily and on demand: a Jira command
+    never requires Confluence to be configured (or vice versa), and a missing
+    credential surfaces a clear per-product error only when that product is used.
     """
 
     load_credentials: Callable[[Product], Credentials]
@@ -645,13 +644,11 @@ class AtlassianClient:
         content: bytes | None = None,
         headers: Headers | None = None,
     ) -> httpx.Response:
-        """Raw passthrough: an arbitrary authenticated request.
+        """Raw passthrough backing `atl api`: an arbitrary authenticated request.
 
-        Backs `atl api`. With one credential configured it is used for any path;
-        with both, the product is inferred from the endpoint (or forced with
-        ``--product``). The endpoint is then resolved against that product's REST
-        root -- the site root for a classic token, the gateway root for a scoped
-        one -- so any REST surface (Jira, Confluence, Agile, v2, ...) is reachable.
+        Routes to the product inferred from the endpoint (or forced with
+        ``--product``, or the sole configured product), then resolves the path
+        against that product's REST root.
         """
         chosen = choose_api_product(endpoint, product, self.available_products())
         surface = self.jira if chosen is Product.JIRA else self.confluence

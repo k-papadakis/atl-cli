@@ -1,5 +1,6 @@
-"""Tests for the pure client helpers: error message extraction, cursor/filename
-parsing, endpoint validation, and web-search URL builders.
+"""Tests for the client layer: the pure helpers (error extraction, cursor/filename
+parsing, endpoint/product resolution, web-search URL builders) and the
+AtlassianClient facade's lazy per-product loading and `atl api` routing.
 """
 
 from collections.abc import Callable
