@@ -39,13 +39,13 @@ app = typer.Typer(
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
-jira_app = typer.Typer(help="Jira work items", no_args_is_help=True)
-conf_app = typer.Typer(help="Confluence pages", no_args_is_help=True)
+jira_app = typer.Typer(help="Jira work items.", no_args_is_help=True)
+conf_app = typer.Typer(help="Confluence pages.", no_args_is_help=True)
 # Credential management is a cross-cutting concern, so it lives in one `auth`
 # group with the product as an argument rather than nested under each content
 # group. A scoped API token is locked to a single product, so `login` names one;
 # `logout`/`status` default to every configured product.
-auth_app = typer.Typer(help="Manage credentials", no_args_is_help=True)
+auth_app = typer.Typer(help="Manage credentials.", no_args_is_help=True)
 app.add_typer(jira_app, name="jira")
 app.add_typer(conf_app, name="confluence")
 app.add_typer(auth_app, name="auth")
@@ -65,7 +65,7 @@ def root(
         typer.Option(
             "--version",
             "-V",
-            help="show the version and exit",
+            help="Show the version and exit.",
             callback=_version_callback,
             is_eager=True,
         ),
@@ -83,16 +83,16 @@ def _connect() -> AtlassianClient:
 
 # Shared option annotations.
 Web = Annotated[
-    bool, typer.Option("--web", help="open in a browser instead of rendering")
+    bool, typer.Option("--web", help="Open in a browser instead of rendering.")
 ]
-Output = Annotated[OutputFormat, typer.Option("-o", "--output", help="output format")]
+Output = Annotated[OutputFormat, typer.Option("-o", "--output", help="Output format.")]
 Limit = Annotated[
-    int | None, typer.Option(min=1, help="max results to return (default: all)")
+    int | None, typer.Option(min=1, help="Max results to return (default: all).")
 ]
 OutputPath = Annotated[
     Path | None,
     typer.Option(
-        "-o", "--output", help="path to write to (default: the attachment's filename)"
+        "-o", "--output", help="Path to write to (default: the attachment's filename)."
     ),
 ]
 
@@ -102,34 +102,34 @@ Method = Annotated[
     typer.Option(
         "-X",
         "--method",
-        help="HTTP method (default: GET, or POST once a field or --input is set)",
+        help="HTTP method (default: GET, or POST once a field or --input is set).",
     ),
 ]
 RawField = Annotated[
     list[str] | None,
-    typer.Option("-f", "--raw-field", help="add a string parameter (key=value)"),
+    typer.Option("-f", "--raw-field", help="Add a string parameter (key=value)."),
 ]
 TypedField = Annotated[
     list[str] | None,
     typer.Option(
         "-F",
         "--field",
-        help="add a typed parameter (key=value; true/false/null/int convert, @file reads a value)",
+        help="Add a typed parameter (key=value; true/false/null/int convert, @file reads a value).",
     ),
 ]
 InputSource = Annotated[
     str | None,
-    typer.Option("--input", help="raw request body from a file, or '-' for stdin"),
+    typer.Option("--input", help="Raw request body from a file, or '-' for stdin."),
 ]
 Header = Annotated[
     list[str] | None,
-    typer.Option("-H", "--header", help="add a request header (key:value)"),
+    typer.Option("-H", "--header", help="Add a request header (key:value)."),
 ]
 ProductOpt = Annotated[
     Product | None,
     typer.Option(
         "--product",
-        help="force the product instead of inferring it from the path",
+        help="Force the product instead of inferring it from the path.",
     ),
 ]
 
@@ -137,7 +137,7 @@ ProductOpt = Annotated[
 @app.command("api")
 def api(
     endpoint: Annotated[
-        str, typer.Argument(help="REST path (e.g. /rest/api/3/myself) or full URL")
+        str, typer.Argument(help="REST path (e.g. /rest/api/3/myself) or full URL.")
     ],
     method: Method = None,
     raw_field: RawField = None,
@@ -161,7 +161,7 @@ def api(
 
 @jira_app.command("view")
 def jira_view(
-    key: Annotated[str, typer.Argument(help="work item key, e.g. SYS-123")],
+    key: Annotated[str, typer.Argument(help="Work item key, e.g. SYS-123.")],
     web: Web = False,
     output: Output = OutputFormat.TEXT,
 ) -> None:
@@ -171,7 +171,7 @@ def jira_view(
 
 @jira_app.command("search")
 def jira_search(
-    jql: Annotated[str, typer.Argument(help="JQL query")],
+    jql: Annotated[str, typer.Argument(help="JQL query.")],
     web: Web = False,
     output: Output = OutputFormat.TEXT,
     limit: Limit = None,
@@ -183,7 +183,7 @@ def jira_search(
 @jira_app.command("download-attachment")
 def jira_download_attachment(
     attachment_id: Annotated[
-        str, typer.Argument(help="attachment id (shown in `atl jira view`)")
+        str, typer.Argument(help="Attachment id (shown in `atl jira view`).")
     ],
     output: OutputPath = None,
 ) -> None:
@@ -193,7 +193,7 @@ def jira_download_attachment(
 
 @conf_app.command("view")
 def confluence_view(
-    page_id: Annotated[int, typer.Argument(min=1, help="numeric page id")],
+    page_id: Annotated[int, typer.Argument(min=1, help="Numeric page id.")],
     web: Web = False,
     output: Output = OutputFormat.TEXT,
 ) -> None:
@@ -203,7 +203,7 @@ def confluence_view(
 
 @conf_app.command("search")
 def confluence_search(
-    cql: Annotated[str, typer.Argument(help="CQL query")],
+    cql: Annotated[str, typer.Argument(help="CQL query.")],
     web: Web = False,
     output: Output = OutputFormat.TEXT,
     limit: Limit = None,
@@ -217,7 +217,7 @@ def confluence_download_attachment(
     attachment_id: Annotated[
         str,
         typer.Argument(
-            help="attachment id, e.g. 'att123456' (shown in `atl confluence view`)"
+            help="Attachment id, e.g. 'att123456' (shown in `atl confluence view`)."
         ),
     ],
     output: OutputPath = None,
@@ -226,10 +226,10 @@ def confluence_download_attachment(
     cmd_confluence_attachment(_connect(), attachment_id, output=output)
 
 
-AuthProduct = Annotated[Product, typer.Argument(help="jira or confluence")]
+AuthProduct = Annotated[Product, typer.Argument(help="Jira or confluence.")]
 OptAuthProduct = Annotated[
     Product | None,
-    typer.Argument(help="jira or confluence (default: all configured products)"),
+    typer.Argument(help="Jira or confluence (default: all configured products)."),
 ]
 
 
