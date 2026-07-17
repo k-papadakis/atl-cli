@@ -13,7 +13,6 @@ resolution) lives in the pure functions below; the rest is the thin I/O shell.
 import contextlib
 import json
 import os
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +22,7 @@ import keyring.errors
 from pydantic import JsonValue, ValidationError
 
 from atl_cli.config import CONFIG_DIR, CRED_FILE, KEYRING_SERVICE, PROG
+from atl_cli.console import success, warn
 from atl_cli.errors import AtlError
 from atl_cli.models import (
     AuthMode,
@@ -164,10 +164,9 @@ def _delete_keyring(product: Product, username: str) -> None:
     except keyring.errors.PasswordDeleteError:
         pass  # no such entry, or a best-effort delete that failed -- either way, move on
     except keyring.errors.KeyringError as exc:
-        print(
+        warn(
             "Warning: could not remove the token from the keyring; "
-            + f"it may still be present: {exc}",
-            file=sys.stderr,
+            + f"it may still be present: {exc}"
         )
 
 
@@ -197,10 +196,9 @@ def save_credentials(
     try:
         keyring.set_password(keyring_service(product), username, token)
     except keyring.errors.KeyringError as exc:
-        print(
+        warn(
             f"Warning: keyring unavailable ({exc}); "
-            + f"storing the token in {CRED_FILE} (mode 600).",
-            file=sys.stderr,
+            + f"storing the token in {CRED_FILE} (mode 600)."
         )
         keyring_ok = False
 
@@ -292,24 +290,24 @@ def _write_or_unlink(credentials: dict[Product, StoredCredential]) -> None:
 def remove_credentials(product: Product) -> None:
     """Remove one product's credential, leaving the other intact."""
     if not CRED_FILE.exists():
-        print("No credentials found.", file=sys.stderr)
+        warn("No credentials found.")
         return
     meta = read_metadata()
     cred = meta.credentials.get(product)
     if cred is None:
-        print(f"No {product.value} credentials found.", file=sys.stderr)
+        warn(f"No {product.value} credentials found.")
         return
     if stored_backend(cred) is TokenBackend.KEYRING:
         _delete_keyring(product, cred.username)
     remaining = {p: c for p, c in meta.credentials.items() if p != product}
     _write_or_unlink(remaining)
-    print(f"{product.value.capitalize()} credentials removed.", file=sys.stderr)
+    success(f"{product.value.capitalize()} credentials removed.")
 
 
 def remove_all_credentials() -> None:
     """Remove every stored credential and delete the file."""
     if not CRED_FILE.exists():
-        print("No credentials found.", file=sys.stderr)
+        warn("No credentials found.")
         return
     meta = read_metadata()
     for product, cred in meta.credentials.items():
@@ -319,4 +317,4 @@ def remove_all_credentials() -> None:
         CRED_FILE.unlink()
     except OSError as exc:
         raise AtlError(f"Could not remove {CRED_FILE}: {exc.strerror}") from exc
-    print("Credentials removed.", file=sys.stderr)
+    success("Credentials removed.")

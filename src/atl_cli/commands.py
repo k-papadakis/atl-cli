@@ -2,7 +2,6 @@
 pure core. Each maps one CLI verb to its side effects.
 """
 
-import getpass
 import json
 import sys
 import webbrowser
@@ -36,6 +35,19 @@ from atl_cli.client import (
     search_pages_url,
 )
 from atl_cli.config import CRED_FILE
+from atl_cli.console import (
+    emit_code,
+    emit_json,
+    emit_markdown,
+    emit_table,
+    emit_text,
+    note,
+    prompt,
+    prompt_secret,
+    spinner,
+    status_line,
+    success,
+)
 from atl_cli.errors import AtlError
 from atl_cli.models import AuthMode, Credentials, Page, Product, StoredCredential
 from atl_cli.rendering import (
@@ -59,10 +71,6 @@ def open_url(url: str) -> None:
     # whether anything happened. The URL is in the message so it can be copied.
     if not webbrowser.open(url):
         raise AtlError(f"No web browser is available. Open this URL manually:\n{url}")
-
-
-def print_json(data: JsonValue) -> None:
-    print(json.dumps(data, indent=2))
 
 
 # --------------------------------------------------------------------------- #
@@ -176,19 +184,34 @@ def plan_request(
             return Request(resolved, None, None, {})
 
 
-def render_response(resp: httpx.Response) -> str | None:
-    """The text to print for a raw response: JSON pretty-printed, else verbatim.
+@dataclass(frozen=True)
+class RenderedBody:
+    """The text to print for a raw response, and how to render it.
 
+    ``language`` is the syntax to highlight as (``"json"`` for a body that
+    actually parses as JSON), or ``None`` to print ``text`` verbatim.
+    """
+
+    text: str
+    language: str | None
+
+
+def render_response(resp: httpx.Response) -> RenderedBody | None:
+    """The body to print for a raw response, or ``None`` for an empty body.
+
+    A body mislabeled as JSON that fails to parse falls back to verbatim text.
     ``None`` means an empty body (e.g. 204), so nothing should be printed.
     """
     if not resp.content:
         return None
-    if "json" not in resp.headers.get("content-type", ""):
-        return resp.text
-    try:
-        return json.dumps(cast(JsonValue, resp.json()), indent=2)
-    except json.JSONDecodeError:
-        return resp.text  # mislabeled body: print it verbatim
+    if "json" in resp.headers.get("content-type", ""):
+        try:
+            return RenderedBody(
+                json.dumps(cast(JsonValue, resp.json()), indent=2), "json"
+            )
+        except json.JSONDecodeError:
+            pass  # mislabeled body: fall through to verbatim
+    return RenderedBody(resp.text, None)
 
 
 def cmd_api(
@@ -225,8 +248,14 @@ def cmd_api(
         content=req.content,
         headers={**req.headers, **user_headers} or None,
     )
-    if (text := render_response(resp)) is not None:
-        print(text)
+    # Colorize a JSON body like `-o json`; anything else prints verbatim.
+    body = render_response(resp)
+    if body is None:
+        return
+    if body.language is None:
+        emit_text(body.text)
+    else:
+        emit_code(body.text, body.language)
 
 
 def read_source(path: str) -> str:
@@ -338,13 +367,13 @@ def _detect_credential(
 
 def cmd_login(product: Product) -> None:
     site = normalize_base_url(
-        input("Atlassian site URL (e.g. 'https://mycompany.atlassian.net'): ")
+        prompt("Atlassian site URL", hint="e.g. 'https://mycompany.atlassian.net'")
     )
-    username = input("Atlassian email/username: ").strip()
+    username = prompt("Atlassian email/username").strip()
     if not username:
         raise AtlError("Username is required.")
 
-    token = getpass.getpass(f"Atlassian API token ({product.value}): ")
+    token = prompt_secret("Atlassian API token", hint=product.value)
     if not token:
         raise AtlError("API token is required.")
 
@@ -362,11 +391,12 @@ def cmd_login(product: Product) -> None:
         mode=creds.mode,
         cloud_id=creds.cloud_id,
     )
-    print(f"Verified as {me.display_name or username}.", file=sys.stderr)
-    print(
+    success(f"Verified as {me.display_name or username}.")
+    # The where/how detail is secondary to the green confirmation above, so grey
+    # it out rather than compete with it for attention.
+    note(
         f"{product.value.capitalize()} credentials saved to {CRED_FILE} "
-        + f"(mode: {creds.mode.value}, token backend: {backend.value})",
-        file=sys.stderr,
+        + f"(mode: {creds.mode.value}, token backend: {backend.value})"
     )
 
 
@@ -389,12 +419,13 @@ def cmd_status(product: Product) -> bool:
     meta = read_metadata()
     cred = meta.credentials.get(product)
     if cred is None:
-        print(
+        status_line(
             f"Not logged in to {product.value}. "
-            + f"Run 'atl auth login {product.value}'."
+            + f"Run 'atl auth login {product.value}'.",
+            style="yellow",
         )
         return True
-    print(
+    status_line(
         f"Logged in to {cred.site_url or cred.url} as {cred.username} "
         + f"(product: {product.value}, mode: {cred.mode.value}, "
         + f"token backend: {stored_backend(cred).value})"
@@ -402,9 +433,9 @@ def cmd_status(product: Product) -> bool:
     try:
         display = _verify_for_status(product, cred)
     except AtlError as exc:
-        print(f"Token could not be verified: {exc}")
+        status_line(f"Token could not be verified: {exc}", style="red")
         return False
-    print(f"Token verified — authenticated as {display}.")
+    status_line(f"Token verified — authenticated as {display}.", style="green")
     return True
 
 
@@ -416,9 +447,10 @@ def cmd_status_all() -> bool:
     """
     products = available_products()
     if not products:
-        print(
+        status_line(
             "Not logged in. Run 'atl auth login jira' or "
-            + "'atl auth login confluence'."
+            + "'atl auth login confluence'.",
+            style="yellow",
         )
         return True
     # Materialize before aggregating: every product must be shown, so all of the
@@ -440,21 +472,26 @@ def cmd_jira_view(
             # The raw single-issue payload (all fields). Unlike the text view, it
             # deliberately does not fold in the separate remote-link/worklog/
             # comment endpoints: `-o json` is the wire issue, for scripting.
-            print_json(client.jira.get_issue_json(key))
+            with spinner(f"Loading {key}…"):
+                data = client.jira.get_issue_json(key)
+            emit_json(data)
         case OutputFormat.TEXT:
-            issue = client.jira.get_issue(key)
-            remote_links = client.jira.get_remote_links(key)
-            worklog = client.jira.get_worklog(key)
-            comments = client.jira.get_comments(key)
-            # Epics keep their children out-of-band; fetch them only for epics
-            # so a normal issue stays a single round of requests.
-            issuetype = issue.fields.issuetype
-            children: Page[SearchIssue] = (
-                client.jira.get_epic_children(key)
-                if issuetype and issuetype.name == "Epic"
-                else Page([], more=False)
+            with spinner(f"Loading {key}…"):
+                issue = client.jira.get_issue(key)
+                remote_links = client.jira.get_remote_links(key)
+                worklog = client.jira.get_worklog(key)
+                comments = client.jira.get_comments(key)
+                # Epics keep their children out-of-band; fetch them only for epics
+                # so a normal issue stays a single round of requests.
+                issuetype = issue.fields.issuetype
+                children: Page[SearchIssue] = (
+                    client.jira.get_epic_children(key)
+                    if issuetype and issuetype.name == "Epic"
+                    else Page([], more=False)
+                )
+            emit_markdown(
+                render_jira_issue(issue, remote_links, worklog, comments, children)
             )
-            print(render_jira_issue(issue, remote_links, worklog, comments, children))
 
 
 def cmd_jira_search(
@@ -472,12 +509,14 @@ def cmd_jira_search(
 
     match output:
         case OutputFormat.JSON:
-            print_json(client.jira.search_json(jql, limit))
+            with spinner("Searching…"):
+                data = client.jira.search_json(jql, limit)
+            emit_json(data)
         case OutputFormat.TEXT:
-            st = jira_search_table(client.jira.search(jql, limit))
-            summary = search_summary(st.count, st.more, f"{base_url}/browse/<KEY>")
-            print(summary, file=sys.stderr)
-            print(st.table)
+            with spinner("Searching…"):
+                st = jira_search_table(client.jira.search(jql, limit))
+            note(search_summary(len(st.rows), st.more, f"{base_url}/browse/<KEY>"))
+            emit_table(st)
 
 
 def cmd_confluence_view(
@@ -491,11 +530,14 @@ def cmd_confluence_view(
 
     match output:
         case OutputFormat.JSON:
-            print_json(client.confluence.get_page_json(page_id))
+            with spinner(f"Loading page {page_id}…"):
+                data = client.confluence.get_page_json(page_id)
+            emit_json(data)
         case OutputFormat.TEXT:
-            page = client.confluence.get_page(page_id)
-            comments = client.confluence.get_page_comments(page_id)
-            print(render_confluence_page(page, comments))
+            with spinner(f"Loading page {page_id}…"):
+                page = client.confluence.get_page(page_id)
+                comments = client.confluence.get_page_comments(page_id)
+            emit_markdown(render_confluence_page(page, comments))
 
 
 def cmd_confluence_search(
@@ -513,14 +555,20 @@ def cmd_confluence_search(
 
     match output:
         case OutputFormat.JSON:
-            print_json(client.confluence.search_json(cql, limit))
+            with spinner("Searching…"):
+                data = client.confluence.search_json(cql, limit)
+            emit_json(data)
         case OutputFormat.TEXT:
-            st = confluence_search_table(client.confluence.search(cql, limit))
-            summary = search_summary(
-                st.count, st.more, f"{base_url}/wiki/pages/viewpage.action?pageId=<ID>"
+            with spinner("Searching…"):
+                st = confluence_search_table(client.confluence.search(cql, limit))
+            note(
+                search_summary(
+                    len(st.rows),
+                    st.more,
+                    f"{base_url}/wiki/pages/viewpage.action?pageId=<ID>",
+                )
             )
-            print(summary, file=sys.stderr)
-            print(st.table)
+            emit_table(st)
 
 
 def _save_download(data: bytes, filename: str | None, output: Path | None) -> None:
@@ -534,7 +582,7 @@ def _save_download(data: bytes, filename: str | None, output: Path | None) -> No
             f"Refusing to overwrite existing file: {path}. Pass --output to choose a path."
         )
     _ = path.write_bytes(data)
-    print(f"Saved {path} ({len(data)} bytes).", file=sys.stderr)
+    success(f"Saved {path} ({len(data)} bytes).")
 
 
 def cmd_jira_attachment(

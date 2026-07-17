@@ -6,7 +6,6 @@ from atl_cli.errors import AtlError
 from atl_cli.models import Page
 from atl_cli.rendering import (
     confluence_search_table,
-    format_table,
     jira_search_table,
     render_confluence_page,
     render_jira_issue,
@@ -70,17 +69,6 @@ ISSUE = {
         ]
     },
 }
-
-
-def test_format_table_aligns_columns_and_strips_trailing_space() -> None:
-    """Each column widens to its longest cell; no line keeps trailing padding."""
-    out = format_table(["ID", "NAME"], [["1", "Ada"], ["1000", "Bo"]])
-    assert out.splitlines() == ["ID    NAME", "1     Ada", "1000  Bo"]
-    assert all(not line.endswith(" ") for line in out.splitlines())
-
-
-def test_format_table_with_no_rows_is_just_the_header() -> None:
-    assert format_table(["ID", "NAME"], []) == "ID  NAME"
 
 
 def test_render_jira_issue_full() -> None:
@@ -215,11 +203,12 @@ def test_jira_search_table() -> None:
         more=False,
     )
     st = jira_search_table(page)
-    # Exact table: four columns (no derivable URL), aligned, Unassigned fallback.
-    assert st.table.splitlines() == [
-        "KEY    STATUS  ASSIGNEE    SUMMARY",
-        "SYS-1  Open    Unassigned  A",
-        "SYS-2  Done    Ada         B",
+    # Neutral structure: four columns (no derivable URL), KEY is the id column.
+    assert st.headers == ["KEY", "STATUS", "ASSIGNEE", "SUMMARY"]
+    assert st.id_col == 0
+    assert st.rows == [
+        ["SYS-1", "Open", "Unassigned", "A"],
+        ["SYS-2", "Done", "Ada", "B"],
     ]
 
 
@@ -323,5 +312,7 @@ def test_confluence_search_table() -> None:
         more=False,
     )
     st = confluence_search_table(page)
-    # Exact table: three columns, no derivable viewpage URL.
-    assert st.table.splitlines() == ["ID  TYPE  TITLE", "10  page  T"]
+    # Neutral structure: three columns, ID is the id column, no derivable URL.
+    assert st.headers == ["ID", "TYPE", "TITLE"]
+    assert st.id_col == 0
+    assert st.rows == [["10", "page", "T"]]

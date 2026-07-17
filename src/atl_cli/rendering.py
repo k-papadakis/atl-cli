@@ -91,8 +91,17 @@ def render_comments(entries: list[tuple[str, str, str]]) -> str:
 
 @dataclass(frozen=True, slots=True)
 class SearchTable:
-    table: str
-    count: int
+    """Neutral tabular data for a search result: a grid the console lays out.
+
+    ``headers`` are the column titles and ``rows`` the string cells, one list per
+    row aligned to ``headers``. ``id_col`` is the index of the identifier column,
+    which the console highlights. ``more`` flags that the server had further
+    results beyond this page.
+    """
+
+    headers: list[str]
+    rows: list[list[str]]
+    id_col: int
     more: bool
 
 
@@ -106,17 +115,6 @@ def search_summary(count: int, more: bool, link_pattern: str) -> str:
     """
     suffix = " (more available; raise --limit)" if more else ""
     return f"{count} result(s){suffix} · links: {link_pattern}"
-
-
-def format_table(headers: list[str], rows: list[list[str]]) -> str:
-    widths = [max(len(row[i]) for row in (headers, *rows)) for i in range(len(headers))]
-
-    def fmt(cells: list[str]) -> str:
-        return "  ".join(
-            c.ljust(w) for c, w in zip(cells, widths, strict=True)
-        ).rstrip()
-
-    return "\n".join(fmt(row) for row in (headers, *rows))
 
 
 # --------------------------------------------------------------------------- #
@@ -299,8 +297,8 @@ def jira_search_table(page: Page[SearchIssue]) -> SearchTable:
         ]
         for issue in page.items
     ]
-    table = format_table(["KEY", "STATUS", "ASSIGNEE", "SUMMARY"], rows)
-    return SearchTable(table=table, count=len(page.items), more=page.more)
+    headers = ["KEY", "STATUS", "ASSIGNEE", "SUMMARY"]
+    return SearchTable(headers=headers, rows=rows, id_col=0, more=page.more)
 
 
 # --------------------------------------------------------------------------- #
@@ -360,5 +358,5 @@ def confluence_search_table(page: Page[SearchPage]) -> SearchTable:
         [text(result.id), text(result.type), text(result.title)]
         for result in page.items
     ]
-    table = format_table(["ID", "TYPE", "TITLE"], rows)
-    return SearchTable(table=table, count=len(page.items), more=page.more)
+    headers = ["ID", "TYPE", "TITLE"]
+    return SearchTable(headers=headers, rows=rows, id_col=0, more=page.more)

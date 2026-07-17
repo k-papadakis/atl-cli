@@ -4,15 +4,18 @@ request planner. No I/O -- file/stdin reads and the HTTP call live in `cmd_api`.
 
 from http import HTTPMethod
 
+import httpx
 import pytest
 
 from atl_cli.commands import (
     FromFile,
     Inline,
+    RenderedBody,
     build_credential,
     coerce_field,
     normalize_base_url,
     plan_request,
+    render_response,
     typed_source,
 )
 from atl_cli.errors import AtlError
@@ -67,6 +70,33 @@ def test_plan_request_raw_body_wins_and_pushes_fields_to_the_query() -> None:
     assert req.content == b'{"body": 1}'
     assert req.params == {"notify": "false"}
     assert req.headers["Content-Type"] == "application/json"
+
+
+def test_render_response_empty_body_prints_nothing() -> None:
+    """An empty body (e.g. 204) yields None so the caller prints nothing."""
+    assert render_response(httpx.Response(204)) is None
+
+
+def test_render_response_pretty_prints_and_flags_real_json() -> None:
+    """A JSON body is re-indented and tagged with the 'json' lexer for highlighting."""
+    resp = httpx.Response(
+        200, headers={"content-type": "application/json"}, content=b'{"a":1}'
+    )
+    assert render_response(resp) == RenderedBody('{\n  "a": 1\n}', "json")
+
+
+def test_render_response_non_json_prints_verbatim() -> None:
+    """A non-JSON content-type prints verbatim with no lexer."""
+    resp = httpx.Response(200, headers={"content-type": "text/plain"}, content=b"hello")
+    assert render_response(resp) == RenderedBody("hello", None)
+
+
+def test_render_response_mislabeled_json_falls_back_to_verbatim() -> None:
+    """A body that claims JSON but fails to parse prints verbatim, not JSON-lexed."""
+    resp = httpx.Response(
+        200, headers={"content-type": "application/json"}, content=b"not json"
+    )
+    assert render_response(resp) == RenderedBody("not json", None)
 
 
 def test_normalize_base_url_strips_trailing_slash_and_wiki_suffix() -> None:

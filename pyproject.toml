@@ -30,6 +30,7 @@ dependencies = [
   "keyring==25.7.0",
   "markdownify==1.2.3",
   "pydantic==2.13.4",
+  "rich==15.0.0",
   "typer==0.26.8",
 ]
 

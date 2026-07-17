@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from rich.console import Console
 
 from atl_cli import __version__
 from atl_cli.account import (
@@ -28,12 +27,9 @@ from atl_cli.commands import (
     cmd_status,
     cmd_status_all,
 )
+from atl_cli.console import emit_text, error
 from atl_cli.errors import AtlError
 from atl_cli.models import Product
-
-# Rich stderr console, as Typer recommends for output/errors; it honors
-# NO_COLOR, FORCE_COLOR and tty detection automatically.
-err_console = Console(stderr=True)
 
 # `-h` alongside `--help` everywhere: Typer has no dedicated knob, but Click's
 # `help_option_names` set on the root context is inherited by every subcommand,
@@ -58,7 +54,7 @@ app.add_typer(auth_app, name="auth")
 def _version_callback(value: bool) -> None:
     """Print the version and exit; eager so `--version` wins over any argument."""
     if value:
-        print(f"atl {__version__}")
+        emit_text(f"atl {__version__}")
         raise typer.Exit()
 
 
@@ -274,7 +270,7 @@ def main() -> None:
     try:
         app()
     except AtlError as exc:
-        # markup=False keeps brackets literal; without it '[...]' in a message is
-        # parsed as Rich tags (mangled, or a MarkupError on unbalanced tags).
-        err_console.print(f"Error: {exc}", style="red", markup=False)
+        # `error` keeps markup=False, so '[...]' in a message stays literal
+        # instead of being parsed as Rich tags (mangled, or a MarkupError).
+        error(f"Error: {exc}")
         raise SystemExit(1) from exc
