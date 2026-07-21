@@ -12,6 +12,7 @@ import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cached_property
+from http import HTTPMethod
 from typing import ClassVar, cast
 
 import httpx
@@ -103,11 +104,6 @@ def _origin(url: str) -> tuple[str, str, int | None]:
     """
     parsed = httpx.URL(url)
     return parsed.scheme, parsed.host, parsed.port
-
-
-def build_gateway_base(product: Product, cloud_id: str) -> str:
-    """The scoped-token REST root for a product on a site's cloud instance."""
-    return f"https://{GATEWAY_HOST}/ex/{product.value}/{cloud_id}"
 
 
 def infer_product(endpoint: str, override: Product | None = None) -> Product:
@@ -269,7 +265,7 @@ def probe(creds: Credentials) -> User:
 # --------------------------------------------------------------------------- #
 def _request(
     creds: Credentials,
-    method: str,
+    method: HTTPMethod,
     url: str,
     *,
     params: Params | None = None,
@@ -305,7 +301,7 @@ def _get_response(
     creds: Credentials, url: str, params: Params | None = None, *, label: str
 ) -> httpx.Response:
     """GET a URL with auth, mapping transport errors to AtlError."""
-    return _request(creds, "GET", url, params=params, label=label)
+    return _request(creds, HTTPMethod.GET, url, params=params, label=label)
 
 
 def _fetch_json(
@@ -640,7 +636,7 @@ class AtlassianClient:
 
     def api(
         self,
-        method: str,
+        method: HTTPMethod,
         endpoint: str,
         *,
         product: Product | None = None,

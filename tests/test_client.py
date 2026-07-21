@@ -4,6 +4,7 @@ AtlassianClient facade's lazy per-product loading and `atl api` routing.
 """
 
 from collections.abc import Callable
+from http import HTTPMethod
 
 import httpx
 import pytest
@@ -256,8 +257,8 @@ def test_api_routes_to_the_product_inferred_from_the_path(
     loader, available = _fake_source([Product.JIRA, Product.CONFLUENCE], [])
     client = AtlassianClient(loader, available)
 
-    _ = client.api("GET", "/wiki/rest/api/content/1")
-    _ = client.api("GET", "/rest/api/3/myself")
+    _ = client.api(HTTPMethod.GET, "/wiki/rest/api/content/1")
+    _ = client.api(HTTPMethod.GET, "/rest/api/3/myself")
 
     assert seen == [Product.CONFLUENCE, Product.JIRA]
 
@@ -280,7 +281,7 @@ def test_api_uses_the_sole_credential_regardless_of_path(
     loader, available = _fake_source([Product.JIRA], loaded)
     client = AtlassianClient(loader, available)
 
-    _ = client.api("GET", "/wiki/rest/api/content/1")
+    _ = client.api(HTTPMethod.GET, "/wiki/rest/api/content/1")
 
     assert seen == [Product.JIRA]
     assert loaded == [Product.JIRA]  # the Confluence loader is never invoked
