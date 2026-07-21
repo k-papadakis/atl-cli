@@ -183,6 +183,17 @@ class CredentialStore:
                 + f"it may still be present: {exc}"
             )
 
+    def _restore_keyring(
+        self, product: Product, username: str, token: str | None
+    ) -> None:
+        try:
+            if token is None:
+                self.keyring.delete(keyring_service(product), username)
+            else:
+                self.keyring.set(keyring_service(product), username, token)
+        except keyring.errors.KeyringError as exc:
+            warn(f"Warning: could not restore the previous keyring token: {exc}")
+
     def save(
         self, product: Product, *, auth: Auth, username: str, token: str
     ) -> TokenBackend:
@@ -195,7 +206,11 @@ class CredentialStore:
 
         existing = self._read_metadata_or_empty()
         keyring_ok = True
+        previous_keyring_token: str | None = None
         try:
+            previous_keyring_token = self.keyring.get(
+                keyring_service(product), username
+            )
             self.keyring.set(keyring_service(product), username, token)
         except keyring.errors.KeyringError as exc:
             warn(
@@ -216,7 +231,7 @@ class CredentialStore:
             _write_secure(self.cred_file, json.dumps(plan.document))
         except OSError as exc:
             if plan.backend is TokenBackend.KEYRING:
-                self._delete_keyring(product, username)
+                self._restore_keyring(product, username, previous_keyring_token)
             raise AtlError(
                 f"Could not write to {self.cred_file}: {exc.strerror}"
             ) from exc
@@ -293,10 +308,10 @@ class CredentialStore:
         if cred is None:
             warn(f"No {product.value} credentials found.")
             return
-        if stored_backend(cred) is TokenBackend.KEYRING:
-            self._delete_keyring(product, cred.username)
         remaining = {p: c for p, c in meta.credentials.items() if p != product}
         self._write_or_unlink(remaining)
+        if stored_backend(cred) is TokenBackend.KEYRING:
+            self._delete_keyring(product, cred.username)
         success(f"{product.value.capitalize()} credentials removed.")
 
     def remove_all(self) -> None:
@@ -304,13 +319,13 @@ class CredentialStore:
             warn("No credentials found.")
             return
         meta = self.read_metadata()
-        for product, cred in meta.credentials.items():
-            if stored_backend(cred) is TokenBackend.KEYRING:
-                self._delete_keyring(product, cred.username)
         try:
             self.cred_file.unlink()
         except OSError as exc:
             raise AtlError(
                 f"Could not remove {self.cred_file}: {exc.strerror}"
             ) from exc
+        for product, cred in meta.credentials.items():
+            if stored_backend(cred) is TokenBackend.KEYRING:
+                self._delete_keyring(product, cred.username)
         success("Credentials removed.")
