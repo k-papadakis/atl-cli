@@ -13,13 +13,15 @@ from atl_cli.commands import (
     RenderedBody,
     build_credential,
     coerce_field,
+    detect_credential,
     normalize_base_url,
     plan_request,
     render_response,
     typed_source,
 )
 from atl_cli.errors import AtlError
-from atl_cli.models import GatewayAuth, Product, SiteAuth
+from atl_cli.models import Credentials, GatewayAuth, Product, SiteAuth
+from atl_cli.schemas import User
 
 
 def test_coerce_field_applies_gh_type_magic() -> None:
@@ -146,3 +148,47 @@ def test_build_credential_uses_the_gateway_root_in_gateway_mode() -> None:
     )
     assert creds.base_url == "https://api.atlassian.com/ex/confluence/cid"
     assert creds.web_base == "https://site"
+
+
+def test_detect_credential_keeps_a_classic_token_on_the_site() -> None:
+    me = User.model_validate({"displayName": "Ada"})
+    creds, verified = detect_credential(
+        Product.JIRA,
+        "https://site",
+        "ada",
+        "token",
+        probe_fn=lambda candidate: me,
+    )
+    assert creds.auth == SiteAuth(site_url="https://site")
+    assert verified is me
+
+
+def test_detect_credential_retries_a_scoped_token_through_the_gateway() -> None:
+    me = User.model_validate({"displayName": "Ada"})
+    responses = iter(
+        [
+            httpx.HTTPStatusError(
+                "unauthorized",
+                request=httpx.Request("GET", "https://site"),
+                response=httpx.Response(401),
+            ),
+            me,
+        ]
+    )
+
+    def probe_candidate(_candidate: Credentials) -> User:
+        result = next(responses)
+        if isinstance(result, httpx.HTTPStatusError):
+            raise result
+        return result
+
+    creds, verified = detect_credential(
+        Product.JIRA,
+        "https://site",
+        "ada",
+        "token",
+        probe_fn=probe_candidate,
+        resolve_cloud_id_fn=lambda _site, _username, _token: "cid",
+    )
+    assert creds.auth == GatewayAuth(site_url="https://site", cloud_id="cid")
+    assert verified is me

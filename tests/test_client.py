@@ -11,6 +11,7 @@ import pytest
 from atl_cli.client import (
     AtlassianClient,
     choose_api_product,
+    choose_cloud_id,
     cursor_from,
     error_message,
     filename_from_disposition,
@@ -28,6 +29,7 @@ from atl_cli.models import (
     SiteAuth,
     build_gateway_base,
 )
+from atl_cli.schemas import AccessibleResource
 
 
 def _creds(
@@ -177,6 +179,27 @@ def test_choose_api_product_override_always_wins() -> None:
         choose_api_product("/rest/api/3/x", Product.CONFLUENCE, [Product.JIRA])
         is Product.CONFLUENCE
     )
+
+
+def test_choose_cloud_id_matches_the_configured_site_origin() -> None:
+    resources = [
+        AccessibleResource(id="other", url="https://other.atlassian.net"),
+        AccessibleResource(id="site", url="https://site"),
+    ]
+    assert choose_cloud_id("https://site", resources) == "site"
+
+
+def test_choose_cloud_id_returns_none_without_a_matching_resource() -> None:
+    resources = [AccessibleResource(id="other", url="https://other.atlassian.net")]
+    assert choose_cloud_id("https://site", resources) is None
+
+
+def test_choose_cloud_id_ignores_malformed_resource_urls() -> None:
+    resources = [
+        AccessibleResource(id="bad", url="not a URL"),
+        AccessibleResource(id="site", url="https://site"),
+    ]
+    assert choose_cloud_id("https://site", resources) == "site"
 
 
 def test_build_gateway_base_names_the_product_and_cloud_id() -> None:

@@ -170,6 +170,18 @@ def resolve_endpoint(creds: Credentials, endpoint: str) -> str:
     return f"{creds.base_url}/{endpoint.removeprefix('/')}"
 
 
+def choose_cloud_id(site_url: str, resources: list[AccessibleResource]) -> str | None:
+    """Return the accessible resource matching a site's origin."""
+    for resource in resources:
+        if resource.id and resource.url:
+            try:
+                if _origin(resource.url) == _origin(site_url):
+                    return resource.id
+            except httpx.InvalidURL:
+                continue
+    return None
+
+
 def resolve_cloud_id(
     site_url: str, username: str | None = None, token: str | None = None
 ) -> str:
@@ -205,13 +217,9 @@ def resolve_cloud_id(
             resources = TypeAdapter(list[AccessibleResource]).validate_python(
                 resp.json()
             )
-            for resource in resources:
-                if (
-                    resource.id
-                    and resource.url
-                    and _origin(resource.url) == _origin(site_url)
-                ):
-                    return resource.id
+            cloud_id = choose_cloud_id(site_url, resources)
+            if cloud_id:
+                return cloud_id
         except (httpx.HTTPError, json.JSONDecodeError, ValidationError):
             pass
 

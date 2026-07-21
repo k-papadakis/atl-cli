@@ -5,6 +5,7 @@ pure core. Each maps one CLI verb to its side effects.
 import json
 import sys
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
@@ -30,7 +31,6 @@ from atl_cli.client import (
     search_issues_url,
     search_pages_url,
 )
-from atl_cli.config import CRED_FILE
 from atl_cli.console import (
     emit_code,
     emit_json,
@@ -317,8 +317,14 @@ def build_credential(
     )
 
 
-def _detect_credential(
-    product: Product, site: str, username: str, token: str
+def detect_credential(
+    product: Product,
+    site: str,
+    username: str,
+    token: str,
+    *,
+    probe_fn: Callable[[Credentials], User] = probe,
+    resolve_cloud_id_fn: Callable[[str, str, str], str] = resolve_cloud_id,
 ) -> tuple[Credentials, User]:
     """Verify the token and settle its auth mode, without persisting anything.
 
@@ -329,7 +335,7 @@ def _detect_credential(
     """
     site_creds = build_credential(product, username, token, SiteAuth(site_url=site))
     try:
-        return site_creds, probe(site_creds)
+        return site_creds, probe_fn(site_creds)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code not in (
             HTTPStatus.UNAUTHORIZED,
@@ -345,12 +351,12 @@ def _detect_credential(
 
     # The site rejected the token as unauthorized: it is likely a scoped token,
     # which only works through the api.atlassian.com gateway.
-    cloud_id = resolve_cloud_id(site, username, token)
+    cloud_id = resolve_cloud_id_fn(site, username, token)
     gw_creds = build_credential(
         product, username, token, GatewayAuth(site_url=site, cloud_id=cloud_id)
     )
     try:
-        return gw_creds, probe(gw_creds)
+        return gw_creds, probe_fn(gw_creds)
     except httpx.HTTPStatusError as exc:
         raise AtlError(
             f"Could not verify the scoped token; nothing was saved. {error_message(exc.response)}"
@@ -376,7 +382,7 @@ def cmd_login(product: Product, store: CredentialStore) -> None:
     # Verify the credentials before persisting, so we never store a token that
     # doesn't work -- and let the probe settle whether it is a classic or scoped
     # token (site URL vs gateway).
-    creds, me = _detect_credential(product, site, username, token)
+    creds, me = detect_credential(product, site, username, token)
 
     backend = store.save(
         product,
@@ -388,7 +394,7 @@ def cmd_login(product: Product, store: CredentialStore) -> None:
     # The where/how detail is secondary to the green confirmation above, so grey
     # it out rather than compete with it for attention.
     note(
-        f"{product.value.capitalize()} credentials saved to {CRED_FILE} "
+        f"{product.value.capitalize()} credentials saved to {store.cred_file} "
         + f"(mode: {creds.auth.kind}, token backend: {backend.value})"
     )
 
