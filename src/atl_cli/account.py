@@ -191,6 +191,8 @@ class CredentialStore:
                 self.keyring.delete(keyring_service(product), username)
             else:
                 self.keyring.set(keyring_service(product), username, token)
+        except keyring.errors.PasswordDeleteError:
+            pass
         except keyring.errors.KeyringError as exc:
             warn(f"Warning: could not restore the previous keyring token: {exc}")
 
@@ -250,7 +252,9 @@ class CredentialStore:
             return StoredMetadata.model_validate_json(raw)
         except ValidationError as exc:
             raise AtlError(
-                f"Credentials file is malformed. Run '{PROG} auth login jira' to reset."
+                "Credentials file is malformed or incompatible. Rename "
+                + f"{self.cred_file} to {self.cred_file}.bak, then run "
+                + f"'{PROG} auth login jira' to set up credentials."
             ) from exc
 
     def _keyring_token(self, product: Product, username: str) -> str | None:

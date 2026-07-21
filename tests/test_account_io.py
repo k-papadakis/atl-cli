@@ -33,6 +33,12 @@ class UnavailableKeyring(MemoryKeyring):
         raise keyring.errors.NoKeyringError()
 
 
+class DeleteErrorKeyring(MemoryKeyring):
+    @override
+    def delete(self, service: str, username: str) -> None:
+        raise keyring.errors.PasswordDeleteError()
+
+
 def test_save_credentials_does_not_overwrite_a_malformed_file(tmp_path: Path) -> None:
     cred_file = tmp_path / "credentials.json"
     original = '{"legacy": "credentials"}'
@@ -132,6 +138,24 @@ def test_store_restores_previous_keyring_token_when_replacement_fails(
         )
 
     assert keyring.values[service_key] == "old-secret"
+
+
+def test_store_ignores_missing_keyring_entry_during_rollback(tmp_path: Path) -> None:
+    parent_file = tmp_path / "not-a-directory"
+    _ = parent_file.write_text("not a directory")
+    store = CredentialStore(
+        cred_file=parent_file / "credentials.json",
+        config_dir=tmp_path,
+        keyring=DeleteErrorKeyring(),
+    )
+
+    with pytest.raises(AtlError, match="Could not write"):
+        _ = store.save(
+            Product.JIRA,
+            auth=SiteAuth(site_url="https://site"),
+            username="ada",
+            token="secret",
+        )
 
 
 def test_store_keeps_keyring_token_when_remove_write_fails(tmp_path: Path) -> None:
