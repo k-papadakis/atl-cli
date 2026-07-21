@@ -10,7 +10,6 @@ import pytest
 
 from atl_cli.client import (
     AtlassianClient,
-    build_gateway_base,
     choose_api_product,
     cursor_from,
     error_message,
@@ -21,23 +20,26 @@ from atl_cli.client import (
     search_pages_url,
 )
 from atl_cli.errors import AtlError
-from atl_cli.models import AuthMode, Credentials, Product
+from atl_cli.models import (
+    Auth,
+    Credentials,
+    GatewayAuth,
+    Product,
+    SiteAuth,
+    build_gateway_base,
+)
 
 
 def _creds(
-    base: str = "https://site",
     *,
-    site_url: str = "https://site",
-    mode: AuthMode = AuthMode.SITE,
+    auth: Auth | None = None,
     product: Product = Product.JIRA,
 ) -> Credentials:
     return Credentials(
-        base_url=base,
         username="ada",
         token="t",
         product=product,
-        mode=mode,
-        site_url=site_url,
+        auth=auth or SiteAuth(site_url="https://site"),
     )
 
 
@@ -102,7 +104,7 @@ def test_resolve_endpoint_joins_paths_to_the_site_root() -> None:
 
 def test_resolve_endpoint_joins_relative_paths_to_the_gateway_in_scoped_mode() -> None:
     """A scoped credential's relative path hangs off the gateway root, not the site."""
-    creds = _creds("https://api.atlassian.com/ex/jira/cid", mode=AuthMode.GATEWAY)
+    creds = _creds(auth=GatewayAuth(site_url="https://site", cloud_id="cid"))
     assert (
         resolve_endpoint(creds, "/rest/api/3/myself")
         == "https://api.atlassian.com/ex/jira/cid/rest/api/3/myself"
@@ -117,7 +119,7 @@ def test_resolve_endpoint_passes_same_origin_full_urls_through() -> None:
 
 def test_resolve_endpoint_accepts_only_the_gateway_origin_in_scoped_mode() -> None:
     """A scoped token reaches its gateway origin only -- never the site it can't use."""
-    creds = _creds("https://api.atlassian.com/ex/jira/cid", mode=AuthMode.GATEWAY)
+    creds = _creds(auth=GatewayAuth(site_url="https://site", cloud_id="cid"))
     gateway_url = "https://api.atlassian.com/ex/jira/cid/rest/api/3/field"
     assert resolve_endpoint(creds, gateway_url) == gateway_url
     with pytest.raises(AtlError, match="credential's own origin"):

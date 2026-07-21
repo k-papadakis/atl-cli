@@ -19,7 +19,7 @@ from atl_cli.commands import (
     typed_source,
 )
 from atl_cli.errors import AtlError
-from atl_cli.models import AuthMode, Product
+from atl_cli.models import GatewayAuth, Product, SiteAuth
 
 
 def test_coerce_field_applies_gh_type_magic() -> None:
@@ -129,18 +129,20 @@ def test_normalize_base_url_rejects_non_http_urls() -> None:
 def test_build_credential_uses_the_site_root_in_site_mode() -> None:
     """A classic token talks to the site root; --web links use the same site."""
     creds = build_credential(
-        Product.JIRA, "https://site", "ada", "t", AuthMode.SITE, None
+        Product.JIRA, "ada", "t", SiteAuth(site_url="https://site")
     )
     assert creds.base_url == "https://site"
-    assert creds.mode is AuthMode.SITE
+    assert creds.auth.kind == "site"
     assert creds.web_base == "https://site"
 
 
 def test_build_credential_uses_the_gateway_root_in_gateway_mode() -> None:
     """A scoped token talks to the gateway, but --web links still use the human site."""
     creds = build_credential(
-        Product.CONFLUENCE, "https://site", "ada", "t", AuthMode.GATEWAY, "cid"
+        Product.CONFLUENCE,
+        "ada",
+        "t",
+        GatewayAuth(site_url="https://site", cloud_id="cid"),
     )
     assert creds.base_url == "https://api.atlassian.com/ex/confluence/cid"
-    assert creds.cloud_id == "cid"
     assert creds.web_base == "https://site"

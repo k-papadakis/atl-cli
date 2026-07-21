@@ -27,7 +27,6 @@ from atl_cli.client import (
     Headers,
     JiraApi,
     Params,
-    build_gateway_base,
     error_message,
     probe,
     resolve_cloud_id,
@@ -49,7 +48,15 @@ from atl_cli.console import (
     success,
 )
 from atl_cli.errors import AtlError
-from atl_cli.models import AuthMode, Credentials, Page, Product, StoredCredential
+from atl_cli.models import (
+    Auth,
+    Credentials,
+    GatewayAuth,
+    Page,
+    Product,
+    SiteAuth,
+    StoredCredential,
+)
 from atl_cli.rendering import (
     confluence_search_table,
     jira_search_table,
@@ -153,7 +160,7 @@ def _query(fields: Fields) -> Params | None:
 # decision is a pure, testable function separate from the HTTP call.
 @dataclass(frozen=True)
 class Request:
-    method: str
+    method: HTTPMethod
     params: Params | None
     content: bytes | None
     headers: Headers
@@ -299,25 +306,17 @@ def normalize_base_url(raw: str) -> str:
 
 def build_credential(
     product: Product,
-    site: str,
     username: str,
     token: str,
-    mode: AuthMode,
-    cloud_id: str | None,
+    auth: Auth,
 ) -> Credentials:
-    """Assemble a candidate credential, choosing the site vs gateway REST root
-    from the auth mode (pure)."""
-    base = (
-        site if mode is AuthMode.SITE else build_gateway_base(product, cloud_id or "")
-    )
+    """Assemble a candidate credential from an auth variant (pure). The REST root
+    is derived from the variant by ``Credentials.base_url``."""
     return Credentials(
-        base_url=base,
         username=username,
         token=token,
         product=product,
-        mode=mode,
-        site_url=site,
-        cloud_id=cloud_id,
+        auth=auth,
     )
 
 
@@ -331,7 +330,7 @@ def _detect_credential(
     failure aborts with nothing saved. Returns the working credential and the
     verified user.
     """
-    site_creds = build_credential(product, site, username, token, AuthMode.SITE, None)
+    site_creds = build_credential(product, username, token, SiteAuth(site_url=site))
     try:
         return site_creds, probe(site_creds)
     except httpx.HTTPStatusError as exc:
@@ -351,7 +350,7 @@ def _detect_credential(
     # which only works through the api.atlassian.com gateway.
     cloud_id = resolve_cloud_id(site, username, token)
     gw_creds = build_credential(
-        product, site, username, token, AuthMode.GATEWAY, cloud_id
+        product, username, token, GatewayAuth(site_url=site, cloud_id=cloud_id)
     )
     try:
         return gw_creds, probe(gw_creds)
@@ -384,19 +383,16 @@ def cmd_login(product: Product) -> None:
 
     backend = save_credentials(
         product,
-        base_url=creds.base_url,
-        site_url=creds.site_url,
+        auth=creds.auth,
         username=username,
         token=token,
-        mode=creds.mode,
-        cloud_id=creds.cloud_id,
     )
     success(f"Verified as {me.display_name or username}.")
     # The where/how detail is secondary to the green confirmation above, so grey
     # it out rather than compete with it for attention.
     note(
         f"{product.value.capitalize()} credentials saved to {CRED_FILE} "
-        + f"(mode: {creds.mode.value}, token backend: {backend.value})"
+        + f"(mode: {creds.auth.kind}, token backend: {backend.value})"
     )
 
 
@@ -426,8 +422,8 @@ def cmd_status(product: Product) -> bool:
         )
         return True
     status_line(
-        f"Logged in to {cred.site_url or cred.url} as {cred.username} "
-        + f"(product: {product.value}, mode: {cred.mode.value}, "
+        f"Logged in to {cred.auth.site_url} as {cred.username} "
+        + f"(product: {product.value}, mode: {cred.auth.kind}, "
         + f"token backend: {stored_backend(cred).value})"
     )
     try:

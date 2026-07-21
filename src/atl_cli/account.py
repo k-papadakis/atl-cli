@@ -1,10 +1,10 @@
 """Credential persistence: metadata in a config file, the token in the keyring.
 
 Credentials are stored *per product* (Jira, Confluence): a scoped API token is
-locked to a single product, so each gets its own entry with its own base URL and
-mode. Non-secret metadata lives in a mode-600 JSON file; the token is kept in the
-OS keyring (keyed per product), falling back to that file when no keyring backend
-is usable.
+locked to a single product, so each gets its own entry with its own auth variant
+(site or gateway). Non-secret metadata lives in a mode-600 JSON file; the token
+is kept in the OS keyring (keyed per product), falling back to that file when no
+keyring backend is usable.
 
 The storage *policy* (key scheme, backend choice, merge, rollback, token
 resolution) lives in the pure functions below; the rest is the thin I/O shell.
@@ -25,7 +25,7 @@ from atl_cli.config import CONFIG_DIR, CRED_FILE, KEYRING_SERVICE, PROG
 from atl_cli.console import success, warn
 from atl_cli.errors import AtlError
 from atl_cli.models import (
-    AuthMode,
+    Auth,
     Credentials,
     Product,
     StoredCredential,
@@ -60,26 +60,37 @@ def serialize_metadata(
 
 
 @dataclass(frozen=True, slots=True)
-class StoragePlan:
-    """What to persist for a credential, and how to recover from a failed write."""
+class KeyringStorage:
+    """Metadata whose token was placed in the keyring and can be rolled back."""
 
-    document: dict[str, JsonValue]  # the credentials document to serialize to the file
-    backend: TokenBackend
-    # The token was placed in the keyring, so a failed metadata write must delete
-    # it again -- otherwise the secret is orphaned with no file to locate it by.
-    rollback_keyring: bool
+    document: dict[str, JsonValue]
+
+    @property
+    def backend(self) -> TokenBackend:
+        return TokenBackend.KEYRING
+
+
+@dataclass(frozen=True, slots=True)
+class FileStorage:
+    """Metadata whose token is included in the credentials file."""
+
+    document: dict[str, JsonValue]
+
+    @property
+    def backend(self) -> TokenBackend:
+        return TokenBackend.FILE
+
+
+type StoragePlan = KeyringStorage | FileStorage
 
 
 def plan_storage(
     existing: StoredMetadata,
     product: Product,
     *,
-    base_url: str,
-    site_url: str,
+    auth: Auth,
     username: str,
     token: str,
-    mode: AuthMode,
-    cloud_id: str | None,
     keyring_ok: bool,
 ) -> StoragePlan:
     """Merge a new/updated per-product credential into the existing document.
@@ -89,19 +100,16 @@ def plan_storage(
     product is preserved.
     """
     cred = StoredCredential(
-        url=base_url,
-        site_url=site_url,
         username=username,
         token=None if keyring_ok else token,
-        mode=mode,
-        cloud_id=cloud_id,
+        auth=auth,
     )
     credentials = dict(existing.credentials)
     credentials[product] = cred
     document = serialize_metadata(credentials)
     if keyring_ok:
-        return StoragePlan(document, TokenBackend.KEYRING, rollback_keyring=True)
-    return StoragePlan(document, TokenBackend.FILE, rollback_keyring=False)
+        return KeyringStorage(document)
+    return FileStorage(document)
 
 
 def resolve_token(
@@ -173,12 +181,9 @@ def _delete_keyring(product: Product, username: str) -> None:
 def save_credentials(
     product: Product,
     *,
-    base_url: str,
-    site_url: str,
+    auth: Auth,
     username: str,
     token: str,
-    mode: AuthMode,
-    cloud_id: str | None,
 ) -> TokenBackend:
     """Persist a product's metadata to the config file and its token to the
     keyring, preserving any credential already stored for the other product.
@@ -205,18 +210,15 @@ def save_credentials(
     plan = plan_storage(
         existing,
         product,
-        base_url=base_url,
-        site_url=site_url,
+        auth=auth,
         username=username,
         token=token,
-        mode=mode,
-        cloud_id=cloud_id,
         keyring_ok=keyring_ok,
     )
     try:
         _write_secure(CRED_FILE, json.dumps(plan.document))
     except OSError as exc:
-        if plan.rollback_keyring:
+        if isinstance(plan, KeyringStorage):
             _delete_keyring(product, username)
         raise AtlError(f"Could not write to {CRED_FILE}: {exc.strerror}") from exc
     return plan.backend
@@ -263,13 +265,10 @@ def load_credentials(product: Product) -> Credentials:
         )
     keyring_token = None if cred.token else _keyring_token(product, cred.username)
     return Credentials(
-        base_url=cred.url,
         username=cred.username,
         token=resolve_token(product, cred, keyring_token),
         product=product,
-        mode=cred.mode,
-        site_url=cred.site_url or cred.url,
-        cloud_id=cred.cloud_id,
+        auth=cred.auth,
     )
 
 

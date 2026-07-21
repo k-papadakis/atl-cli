@@ -19,7 +19,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from atl_cli.config import HTTP_TIMEOUT, SEARCH_PAGE_SIZE
 from atl_cli.errors import AtlError
-from atl_cli.models import Credentials, Page, Product
+from atl_cli.models import GATEWAY_HOST, Credentials, Page, Product
 from atl_cli.schemas import (
     AccessibleResource,
     ApiError,
@@ -37,10 +37,6 @@ from atl_cli.schemas import (
     User,
     WorklogPage,
 )
-
-# Scoped API tokens reach the REST API through this gateway rather than the site
-# URL (which returns 401 for them); classic tokens keep using the site URL.
-GATEWAY_HOST = "api.atlassian.com"
 
 type Params = dict[str, str | int]
 type Headers = dict[str, str]
