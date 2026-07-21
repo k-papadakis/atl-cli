@@ -8,10 +8,7 @@ import typer
 
 from atl_cli import __version__
 from atl_cli.account import (
-    available_products,
-    load_credentials,
-    remove_all_credentials,
-    remove_credentials,
+    CredentialStore,
 )
 from atl_cli.client import AtlassianClient
 from atl_cli.commands import (
@@ -76,9 +73,14 @@ def root(
     pass
 
 
-def _connect() -> AtlassianClient:
+def _store() -> CredentialStore:
+    return CredentialStore()
+
+
+def _client() -> AtlassianClient:
     """Return a client that loads each product's credential on demand."""
-    return AtlassianClient(load_credentials, available_products)
+    store = _store()
+    return AtlassianClient(store.load, store.available_products)
 
 
 # Shared option annotations.
@@ -148,7 +150,7 @@ def api(
 ) -> None:
     """Make an authenticated request to the Atlassian REST API (Jira or Confluence)."""
     cmd_api(
-        _connect(),
+        _client(),
         endpoint,
         method=method,
         raw_fields=raw_field or [],
@@ -166,7 +168,7 @@ def jira_view(
     output: Output = OutputFormat.TEXT,
 ) -> None:
     """View a work item."""
-    cmd_jira_view(_connect(), key, web=web, output=output)
+    cmd_jira_view(_client(), key, web=web, output=output)
 
 
 @jira_app.command("search")
@@ -177,7 +179,7 @@ def jira_search(
     limit: Limit = None,
 ) -> None:
     """Search work items with JQL."""
-    cmd_jira_search(_connect(), jql, web=web, output=output, limit=limit)
+    cmd_jira_search(_client(), jql, web=web, output=output, limit=limit)
 
 
 @jira_app.command("download-attachment")
@@ -188,7 +190,7 @@ def jira_download_attachment(
     output: OutputPath = None,
 ) -> None:
     """Download a work-item attachment by id."""
-    cmd_jira_attachment(_connect(), attachment_id, output=output)
+    cmd_jira_attachment(_client(), attachment_id, output=output)
 
 
 @conf_app.command("view")
@@ -198,7 +200,7 @@ def confluence_view(
     output: Output = OutputFormat.TEXT,
 ) -> None:
     """View a page."""
-    cmd_confluence_view(_connect(), str(page_id), web=web, output=output)
+    cmd_confluence_view(_client(), str(page_id), web=web, output=output)
 
 
 @conf_app.command("search")
@@ -209,7 +211,7 @@ def confluence_search(
     limit: Limit = None,
 ) -> None:
     """Search pages with CQL."""
-    cmd_confluence_search(_connect(), cql, web=web, output=output, limit=limit)
+    cmd_confluence_search(_client(), cql, web=web, output=output, limit=limit)
 
 
 @conf_app.command("download-attachment")
@@ -223,7 +225,7 @@ def confluence_download_attachment(
     output: OutputPath = None,
 ) -> None:
     """Download a page attachment by id."""
-    cmd_confluence_attachment(_connect(), attachment_id, output=output)
+    cmd_confluence_attachment(_client(), attachment_id, output=output)
 
 
 AuthProduct = Annotated[Product, typer.Argument(help="Jira or confluence.")]
@@ -236,22 +238,23 @@ OptAuthProduct = Annotated[
 @auth_app.command("login")
 def auth_login(product: AuthProduct) -> None:
     """Save or update a product's credentials."""
-    cmd_login(product)
+    cmd_login(product, _store())
 
 
 @auth_app.command("logout")
 def auth_logout(product: OptAuthProduct = None) -> None:
     """Remove a product's credentials, or all of them."""
     if product is None:
-        remove_all_credentials()
+        _store().remove_all()
     else:
-        remove_credentials(product)
+        _store().remove(product)
 
 
 @auth_app.command("status")
 def auth_status(product: OptAuthProduct = None) -> None:
     """Show a product's account, or every configured product."""
-    ok = cmd_status_all() if product is None else cmd_status(product)
+    store = _store()
+    ok = cmd_status_all(store) if product is None else cmd_status(product, store)
     if not ok:
         # A token that can't be verified is reported on stdout above; exit non-zero
         # so scripts can detect it. typer.Exit (not AtlError) keeps main() from

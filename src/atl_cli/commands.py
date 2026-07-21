@@ -15,10 +15,7 @@ import httpx
 from pydantic import HttpUrl, JsonValue, TypeAdapter, ValidationError
 
 from atl_cli.account import (
-    available_products,
-    load_credentials,
-    read_metadata,
-    save_credentials,
+    CredentialStore,
     stored_backend,
 )
 from atl_cli.client import (
@@ -364,7 +361,7 @@ def _detect_credential(
         ) from exc
 
 
-def cmd_login(product: Product) -> None:
+def cmd_login(product: Product, store: CredentialStore) -> None:
     site = normalize_base_url(
         prompt("Atlassian site URL", hint="e.g. 'https://mycompany.atlassian.net'")
     )
@@ -381,7 +378,7 @@ def cmd_login(product: Product) -> None:
     # token (site URL vs gateway).
     creds, me = _detect_credential(product, site, username, token)
 
-    backend = save_credentials(
+    backend = store.save(
         product,
         auth=creds.auth,
         username=username,
@@ -396,15 +393,17 @@ def cmd_login(product: Product) -> None:
     )
 
 
-def _verify_for_status(product: Product, cred: StoredCredential) -> str:
+def _verify_for_status(
+    product: Product, cred: StoredCredential, store: CredentialStore
+) -> str:
     """Load the product's credential and confirm the token; return the display name."""
-    creds = load_credentials(product)
+    creds = store.load(product)
     api = JiraApi(creds) if product is Product.JIRA else ConfluenceApi(creds)
     me = api.get_myself()
     return me.display_name or cred.username
 
 
-def cmd_status(product: Product) -> bool:
+def cmd_status(product: Product, store: CredentialStore) -> bool:
     """Report a product's account and whether its token still verifies.
 
     Returns True only if the token was retrieved and accepted. Verification is a
@@ -412,7 +411,7 @@ def cmd_status(product: Product) -> bool:
     printed in order, so a keyring/network/token failure can't contradict an
     already-emitted success line.
     """
-    meta = read_metadata()
+    meta = store.read_metadata()
     cred = meta.credentials.get(product)
     if cred is None:
         status_line(
@@ -427,7 +426,7 @@ def cmd_status(product: Product) -> bool:
         + f"token backend: {stored_backend(cred).value})"
     )
     try:
-        display = _verify_for_status(product, cred)
+        display = _verify_for_status(product, cred, store)
     except AtlError as exc:
         status_line(f"Token could not be verified: {exc}", style="red")
         return False
@@ -435,13 +434,13 @@ def cmd_status(product: Product) -> bool:
     return True
 
 
-def cmd_status_all() -> bool:
+def cmd_status_all(store: CredentialStore) -> bool:
     """Show every configured product (for the top-level ``atl auth status``).
 
     Every configured product is always shown; the return is False if any of them
     failed to verify.
     """
-    products = available_products()
+    products = store.available_products()
     if not products:
         status_line(
             "Not logged in. Run 'atl auth login jira' or "
@@ -452,7 +451,7 @@ def cmd_status_all() -> bool:
     # Materialize before aggregating: every product must be shown, so all of the
     # (printing) cmd_status calls have to run. A generator would let all() short-
     # circuit on the first failure and skip the rest of the output.
-    results = [cmd_status(product) for product in products]
+    results = [cmd_status(product, store) for product in products]
     return all(results)
 
 

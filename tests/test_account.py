@@ -10,8 +10,6 @@ import pytest
 from pydantic import ValidationError
 
 from atl_cli.account import (
-    FileStorage,
-    KeyringStorage,
     keyring_service,
     plan_storage,
     resolve_token,
@@ -46,7 +44,6 @@ def test_keyring_service_is_scoped_per_product() -> None:
 
 def test_plan_storage_keeps_token_out_of_the_file_when_keyring_works() -> None:
     plan = _plan(keyring_ok=True)
-    assert isinstance(plan, KeyringStorage)
     assert plan.backend is TokenBackend.KEYRING
     jira = StoredMetadata.model_validate(plan.document).credentials[Product.JIRA]
     assert jira.token is None  # the secret stays in the keyring, not the file
@@ -70,7 +67,6 @@ def test_plan_storage_serializes_the_tagged_auth_shape() -> None:
 
 def test_plan_storage_falls_back_to_file_when_keyring_unavailable() -> None:
     plan = _plan(keyring_ok=False)
-    assert isinstance(plan, FileStorage)
     assert plan.backend is TokenBackend.FILE
     jira = StoredMetadata.model_validate(plan.document).credentials[Product.JIRA]
     assert jira.token == "secret"
