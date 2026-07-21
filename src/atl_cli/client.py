@@ -464,7 +464,9 @@ class JiraApi:
             )
             issues.extend(page.issues)
             token = page.next_page_token
-            server_more = page.is_last is False or token is not None
+            # The continuation token is the only actionable signal. Jira has
+            # returned inconsistent combinations of isLast and nextPageToken.
+            server_more = token is not None
             if not server_more or (limit is not None and len(issues) >= limit):
                 return issues, server_more
 
